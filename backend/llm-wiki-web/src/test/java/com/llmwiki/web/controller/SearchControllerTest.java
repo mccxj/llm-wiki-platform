@@ -1,5 +1,6 @@
 package com.llmwiki.web.controller;
 
+import com.llmwiki.common.dto.SearchRequest;
 import com.llmwiki.service.search.SearchService;
 import com.llmwiki.service.search.SearchService.AnswerResult;
 import com.llmwiki.service.search.SearchService.SearchResult;
@@ -27,9 +28,10 @@ class SearchControllerTest {
         SearchResult sr = new SearchResult();
         sr.pageSlug = "java";
         List<SearchResult> expected = List.of(sr);
-        when(searchService.search("java", 10)).thenReturn(expected);
+        SearchRequest request = SearchRequest.builder().query("java").limit(10).build();
+        when(searchService.search(request)).thenReturn(expected);
 
-        var response = controller.search("java", 10);
+        var response = controller.search(request);
 
         assertEquals(200, response.getStatusCodeValue());
         assertEquals(1, response.getBody().size());
@@ -37,12 +39,44 @@ class SearchControllerTest {
     }
 
     @Test
-    void search_shouldUseDefaultLimit() {
-        when(searchService.search("test", 10)).thenReturn(List.of());
+    void search_shouldReturn400ForBlankQuery() {
+        SearchRequest request = SearchRequest.builder().query("").build();
 
-        controller.search("test", 10);
+        var response = controller.search(request);
 
-        verify(searchService).search("test", 10);
+        assertEquals(400, response.getStatusCodeValue());
+        verify(searchService, never()).search(any(SearchRequest.class));
+    }
+
+    @Test
+    void search_shouldReturn400ForNullQuery() {
+        SearchRequest request = SearchRequest.builder().build();
+
+        var response = controller.search(request);
+
+        assertEquals(400, response.getStatusCodeValue());
+        verify(searchService, never()).search(any(SearchRequest.class));
+    }
+
+    @Test
+    void search_shouldPassTypesAndTags() {
+        SearchResult sr = new SearchResult();
+        sr.nodeType = "ENTITY";
+        List<SearchResult> expected = List.of(sr);
+        SearchRequest request = SearchRequest.builder()
+                .query("java")
+                .types(List.of("ENTITY"))
+                .tags(List.of("programming"))
+                .limit(5)
+                .offset(0)
+                .build();
+        when(searchService.search(request)).thenReturn(expected);
+
+        var response = controller.search(request);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(1, response.getBody().size());
+        verify(searchService).search(request);
     }
 
     @Test
@@ -71,5 +105,48 @@ class SearchControllerTest {
 
         assertEquals(400, response.getStatusCodeValue());
         verify(searchService, never()).ask(any());
+    }
+
+    @Test
+    void searchByTag_shouldReturnResults() {
+        SearchResult sr = new SearchResult();
+        sr.nodeName = "Java";
+        List<SearchResult> expected = List.of(sr);
+        when(searchService.searchByTag("java", 20)).thenReturn(expected);
+
+        var response = controller.searchByTag("java", 20);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(1, response.getBody().size());
+        assertEquals("Java", response.getBody().get(0).nodeName);
+    }
+
+    @Test
+    void searchByRelation_shouldReturnResults() {
+        SearchResult sr = new SearchResult();
+        sr.nodeName = "Related";
+        List<SearchResult> expected = List.of(sr);
+        UUID nodeId = UUID.randomUUID();
+        when(searchService.searchByRelation(nodeId, "RELATED_TO", 20)).thenReturn(expected);
+
+        var response = controller.searchByRelation(nodeId, "RELATED_TO", 20);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(1, response.getBody().size());
+        assertEquals("Related", response.getBody().get(0).nodeName);
+    }
+
+    @Test
+    void searchByRelation_shouldWorkWithNullRelationType() {
+        SearchResult sr = new SearchResult();
+        sr.nodeName = "AnyRelation";
+        List<SearchResult> expected = List.of(sr);
+        UUID nodeId = UUID.randomUUID();
+        when(searchService.searchByRelation(nodeId, null, 20)).thenReturn(expected);
+
+        var response = controller.searchByRelation(nodeId, null, 20);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(1, response.getBody().size());
     }
 }

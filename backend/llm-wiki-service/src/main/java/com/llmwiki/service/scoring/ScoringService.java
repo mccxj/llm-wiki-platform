@@ -69,16 +69,17 @@ public class ScoringService {
 
     /**
      * 获取评分权重配置。
-     * 从 system_config 中读取，格式为 "relevance:0.3,completeness:0.3,accuracy:0.2,clarity:0.2"
+     * 从 system_config 中读取，格式为 "information_density:0.3,entity_richness:0.25,knowledge_independence:0.2,structure_integrity:0.15,timeliness:0.1"
      *
      * @return 权重映射
      */
     public Map<String, BigDecimal> getScoreWeights() {
         Map<String, BigDecimal> defaultWeights = new HashMap<>();
-        defaultWeights.put("relevance", new BigDecimal("0.30"));
-        defaultWeights.put("completeness", new BigDecimal("0.30"));
-        defaultWeights.put("accuracy", new BigDecimal("0.20"));
-        defaultWeights.put("clarity", new BigDecimal("0.20"));
+        defaultWeights.put("information_density", new BigDecimal("0.30"));
+        defaultWeights.put("entity_richness", new BigDecimal("0.25"));
+        defaultWeights.put("knowledge_independence", new BigDecimal("0.20"));
+        defaultWeights.put("structure_integrity", new BigDecimal("0.15"));
+        defaultWeights.put("timeliness", new BigDecimal("0.10"));
 
         return configRepo.findByKey(WEIGHTS_KEY)
                 .map(config -> {

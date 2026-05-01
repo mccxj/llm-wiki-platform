@@ -1,5 +1,7 @@
 package com.llmwiki.service.maintenance;
 
+import com.llmwiki.domain.graph.entity.KgEdge;
+import com.llmwiki.domain.graph.entity.KgNode;
 import com.llmwiki.domain.graph.repository.KgEdgeRepository;
 import com.llmwiki.domain.graph.repository.KgNodeRepository;
 import com.llmwiki.domain.page.entity.Page;
@@ -78,6 +80,42 @@ public class MaintenanceService {
         return pageRepo.findAll().stream()
                 .filter(p -> Boolean.TRUE.equals(p.getContested()))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 查找建议拆分的页面（content长度超过10000字符，约200行）
+     */
+    public List<Page> findSplitSuggestions() {
+        return pageRepo.findAll().stream()
+                .filter(p -> p.getContent() != null && p.getContent().length() > 10000)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * 索引一致性检查：查找有页面但无对应节点关联的页面
+     */
+    public Map<String, Object> indexConsistencyCheck() {
+        List<KgNode> allNodes = kgNodeRepo.findAll();
+        Set<UUID> pageIdsWithNodes = new HashSet<>();
+        for (KgNode n : allNodes) {
+            if (n.getPageId() != null) {
+                pageIdsWithNodes.add(n.getPageId());
+            }
+        }
+
+        // Pages without any associated nodes
+        List<String> orphanPages = new ArrayList<>();
+        for (Page p : pageRepo.findAll()) {
+            if (!pageIdsWithNodes.contains(p.getId())) {
+                orphanPages.add(p.getTitle());
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalPages", pageRepo.count());
+        result.put("pagesWithoutNodes", orphanPages.size());
+        result.put("orphanPages", orphanPages);
+        return result;
     }
 
     /**

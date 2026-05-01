@@ -14,23 +14,6 @@ spring:
   flyway:
     enabled: false
 
-jwt:
-  secret: test-jwt-secret-key-at-least-256-bits-long-for-hs256-algorithm
-  expiration: 86400000
-
-ai:
-  api:
-    base-url: http://localhost:9999
-    api-key: test-key
-    model: test-model
-  embedding:
-    base-url: http://localhost:9999
-    api-key: test-key
-    model: test-embedding-model
-
-scoring:
-  threshold: 5.0
-
 logging:
   level:
     root: WARN

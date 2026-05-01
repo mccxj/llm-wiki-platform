@@ -18,6 +18,8 @@ import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageLinkRepository;
 import com.llmwiki.domain.page.repository.PageRepository;
 import com.llmwiki.domain.page.repository.PageTagRepository;
+import com.llmwiki.domain.pipeline.entity.DeadLetterQueue;
+import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
@@ -48,6 +50,7 @@ class PipelineServiceTest {
     @Mock PageLinkRepository pageLinkRepo;
     @Mock PageTagRepository pageTagRepo;
     @Mock ApprovalQueueRepository approvalQueueRepo;
+    @Mock DeadLetterQueueRepository deadLetterQueueRepo;
     @Mock SystemConfigRepository configRepo;
     @Mock AiApiClient aiClient;
     @Mock EmbeddingClient embeddingClient;
@@ -308,5 +311,121 @@ class PipelineServiceTest {
         ArgumentCaptor<Page> pageCaptor = ArgumentCaptor.forClass(Page.class);
         verify(pageRepo).save(pageCaptor.capture());
         assertEquals("java-programming-1", pageCaptor.getValue().getSlug());
+    }
+
+    // ===== Retry + DLQ Tests =====
+
+    @Test
+    void processDocument_shouldRetryOnFailureAndSaveToDlq() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        // Score always fails
+        when(aiClient.score(doc.getContent())).thenThrow(new RuntimeException("AI service unavailable"));
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Should have retried 3 times
+        verify(aiClient, times(3)).score(doc.getContent());
+        // Should have saved to DLQ
+        ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
+        verify(deadLetterQueueRepo).save(dlqCaptor.capture());
+        DeadLetterQueue dlq = dlqCaptor.getValue();
+        assertEquals("SCORE", dlq.getStep());
+        assertEquals(rawDocId, dlq.getRawDocumentId());
+        assertEquals("PENDING", dlq.getStatus());
+        assertEquals(3, dlq.getRetryCount());
+        assertTrue(dlq.getErrorMessage().contains("AI service unavailable"));
+    }
+
+    @Test
+    void processDocument_shouldSucceedOnRetry() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        // First call fails, second succeeds
+        when(aiClient.score(doc.getContent()))
+                .thenThrow(new RuntimeException("Transient error"))
+                .thenReturn(scoreResult);
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Should have called score twice (1 fail + 1 success)
+        verify(aiClient, times(2)).score(doc.getContent());
+        // Should NOT have saved to DLQ
+        verify(deadLetterQueueRepo, never()).save(any());
+    }
+
+    @Test
+    void processDocument_shouldSaveDlqForEntityExtractionFailure() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(aiClient.extractEntities(doc.getContent())).thenThrow(new RuntimeException("Extraction failed"));
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        verify(aiClient, times(3)).extractEntities(doc.getContent());
+        ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
+        verify(deadLetterQueueRepo).save(dlqCaptor.capture());
+        assertEquals("ENTITY_EXTRACTION", dlqCaptor.getValue().getStep());
+    }
+
+    @Test
+    void retryDeadLetter_shouldRetryAndMarkResolved() {
+        UUID dlqId = UUID.randomUUID();
+        DeadLetterQueue dlq = DeadLetterQueue.builder()
+                .id(dlqId)
+                .rawDocumentId(rawDocId)
+                .step("SCORE")
+                .errorMessage("AI service unavailable")
+                .retryCount(3)
+                .maxRetries(3)
+                .status("PENDING")
+                .build();
+
+        when(deadLetterQueueRepo.findById(dlqId)).thenReturn(Optional.of(dlq));
+        when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
+
+        // Mock successful pipeline execution
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
+        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.retryDeadLetter(dlqId);
+
+        ArgumentCaptor<DeadLetterQueue> captor = ArgumentCaptor.forClass(DeadLetterQueue.class);
+        verify(deadLetterQueueRepo, atLeast(2)).save(captor.capture());
+        List<DeadLetterQueue> saved = captor.getAllValues();
+        // First save sets RETRYING, last save should set RESOLVED
+        assertEquals("RESOLVED", saved.get(saved.size() - 1).getStatus());
+    }
+
+    @Test
+    void retryDeadLetter_shouldThrowWhenNotFound() {
+        UUID dlqId = UUID.randomUUID();
+        when(deadLetterQueueRepo.findById(dlqId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> pipelineService.retryDeadLetter(dlqId));
+    }
+
+    @Test
+    void retryDeadLetter_shouldThrowWhenStatusNotRetryable() {
+        UUID dlqId = UUID.randomUUID();
+        DeadLetterQueue dlq = DeadLetterQueue.builder()
+                .id(dlqId).status("RESOLVED").build();
+
+        when(deadLetterQueueRepo.findById(dlqId)).thenReturn(Optional.of(dlq));
+
+        assertThrows(IllegalStateException.class,
+                () -> pipelineService.retryDeadLetter(dlqId));
     }
 }

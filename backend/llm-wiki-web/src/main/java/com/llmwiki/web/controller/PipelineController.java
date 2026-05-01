@@ -2,6 +2,8 @@ package com.llmwiki.web.controller;
 
 import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageRepository;
+import com.llmwiki.domain.pipeline.entity.DeadLetterQueue;
+import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.entity.ProcessingLog;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
@@ -23,6 +25,7 @@ public class PipelineController {
     private final RawDocumentRepository rawDocRepo;
     private final ProcessingLogRepository procLogRepo;
     private final PageRepository pageRepo;
+    private final DeadLetterQueueRepository deadLetterQueueRepo;
 
     /**
      * Trigger pipeline processing for a raw document.
@@ -69,5 +72,34 @@ public class PipelineController {
         return pageRepo.findById(id)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * List all dead letter queue entries, optionally filtered by status.
+     */
+    @GetMapping("/dead-letters")
+    public ResponseEntity<List<DeadLetterQueue>> getDeadLetters(
+            @RequestParam(required = false) String status) {
+        if (status != null && !status.isBlank()) {
+            return ResponseEntity.ok(deadLetterQueueRepo.findByStatus(status));
+        }
+        return ResponseEntity.ok(deadLetterQueueRepo.findAll());
+    }
+
+    /**
+     * Retry a specific dead letter entry.
+     */
+    @PostMapping("/retry/{deadLetterId}")
+    public ResponseEntity<?> retryDeadLetter(@PathVariable UUID deadLetterId) {
+        try {
+            pipelineService.retryDeadLetter(deadLetterId);
+            return ResponseEntity.ok("Dead letter " + deadLetterId + " retried successfully");
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body("Retry failed: " + e.getMessage());
+        }
     }
 }
