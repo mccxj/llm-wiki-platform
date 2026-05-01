@@ -81,6 +81,15 @@ public class MaintenanceService {
     }
 
     /**
+     * 查找建议拆分的页面（content长度超过10000字符，约200行）
+     */
+    public List<Page> findSplitSuggestions() {
+        return pageRepo.findAll().stream()
+                .filter(p -> p.getContent() != null && p.getContent().length() > 10000)
+                .collect(Collectors.toList());
+    }
+
+    /**
      * 生成维护报告
      */
     public MaintenanceReport generateReport() {
