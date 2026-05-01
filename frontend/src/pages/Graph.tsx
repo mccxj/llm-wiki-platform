@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Card, Typography, Spin, message, Button, Space, Tag, Drawer, Descriptions } from 'antd';
 import { ReloadOutlined, NodeIndexOutlined } from '@ant-design/icons';
 import * as d3 from 'd3';
-import { getGraphData, getOrphans } from '../api';
+import { getGraphData, getOrphans, GraphData, GraphNode } from '../api';
 
 const { Title, Text } = Typography;
 
@@ -31,7 +31,7 @@ export default function Graph() {
   const [loading, setLoading] = useState(true);
   const [graphData, setGraphData] = useState<{ nodes: SimNode[]; links: SimLink[] }>({ nodes: [], links: [] });
   const [selectedNode, setSelectedNode] = useState<SimNode | null>(null);
-  const [orphans, setOrphans] = useState<any[]>([]);
+  const [orphans, setOrphans] = useState<GraphNode[]>([]);
   const [showOrphans, setShowOrphans] = useState(false);
 
   const loadGraph = useCallback(async () => {
@@ -40,7 +40,7 @@ export default function Graph() {
       const [graphRes, orphansRes] = await Promise.all([getGraphData(), getOrphans()]);
       const data = graphRes.data;
       setGraphData({
-        nodes: data.nodes.map((n: any) => ({ ...n })),
+        nodes: data.nodes.map((n: GraphNode) => ({ ...n })),
         links: data.edges.map((e: any) => ({ ...e })),
       });
       setOrphans(orphansRes.data);
@@ -203,9 +203,9 @@ export default function Graph() {
           <Text type="secondary">没有孤儿节点</Text>
         ) : (
           <div>
-            {orphans.map((n: any) => (
+            {orphans.map((n: GraphNode) => (
               <div key={n.id} style={{ padding: 8, borderBottom: '1px solid #f0f0f0' }}>
-                <Tag color={NODE_COLORS[n.nodeType] || '#999'}>{n.nodeType}</Tag>
+                <Tag color={NODE_COLORS[n.type] || '#999'}>{n.type}</Tag>
                 <Text strong>{n.name}</Text>
                 {n.description && <Text type="secondary" style={{ display: 'block', fontSize: 12 }}>{n.description}</Text>}
               </div>

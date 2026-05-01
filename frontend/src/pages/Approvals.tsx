@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Tag, Space, Typography, message, Modal, Input } from 'antd';
+import { Table, Button, Tag, Space, Typography, message, Modal, Input, Spin } from 'antd';
 import { CheckOutlined, CloseOutlined } from '@ant-design/icons';
-import { getApprovals, approvePage, rejectPage } from '../api';
+import { getApprovals, approvePage, rejectPage, ApprovalItem } from '../api';
 
 const { Title } = Typography;
 const { TextArea } = Input;
 
 export default function Approvals() {
-  const [approvals, setApprovals] = useState<any[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [currentAction, setCurrentAction] = useState<{ id: string; type: 'approve' | 'reject' } | null>(null);
@@ -19,7 +19,7 @@ export default function Approvals() {
       const res = await getApprovals();
       setApprovals(res.data);
     } catch (e) {
-      message.error('加载失败');
+      message.error('加载审批列表失败');
     }
     setLoading(false);
   };
@@ -68,7 +68,7 @@ export default function Approvals() {
           { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 180, render: (d: string) => new Date(d).toLocaleString() },
           {
             title: '操作', key: 'ops', width: 160,
-            render: (_: any, record: any) => record.status === 'PENDING' ? (
+            render: (_: any, record: ApprovalItem) => record.status === 'PENDING' ? (
               <Space>
                 <Button type="primary" size="small" icon={<CheckOutlined />} onClick={() => openModal(record.id, 'approve')}>批准</Button>
                 <Button danger size="small" icon={<CloseOutlined />} onClick={() => openModal(record.id, 'reject')}>拒绝</Button>

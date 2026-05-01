@@ -49,3 +49,7 @@ pipeline:
 sync:
   enabled: true
   default-cron: "0 0 */6 * * *"
+
+jwt:
+  secret: ${JWT_SECRET:llm-wiki-platform-secret-key-at-least-256-bits-long-for-hs256}
+  expiration: 86400000  # 24小时

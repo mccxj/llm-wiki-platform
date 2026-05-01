@@ -9,6 +9,8 @@ import PageDetail from './pages/PageDetail';
 import Approvals from './pages/Approvals';
 import Search from './pages/Search';
 import Graph from './pages/Graph';
+import Qa from './pages/Qa';
+import Admin from './pages/Admin';
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
             <Route path="approvals" element={<Approvals />} />
             <Route path="search" element={<Search />} />
             <Route path="graph" element={<Graph />} />
+            <Route path="qa" element={<Qa />} />
+            <Route path="admin" element={<Admin />} />
           </Route>
         </Routes>
       </BrowserRouter>
