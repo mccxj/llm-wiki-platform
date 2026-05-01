@@ -83,14 +83,26 @@ export interface SearchResult {
   pageContent?: string;
 }
 
+export interface SearchRequest {
+  query: string;
+  types?: string[];
+  tags?: string[];
+  limit?: number;
+  offset?: number;
+}
+
 export interface AnswerResult {
   answer: string;
   source: string;
   citations: string[];
 }
 
-export const search = (q: string, limit = 10) => api.get<SearchResult[]>('/search', { params: { q, limit } });
-export const askQuestion = (question: string) => api.post<AnswerResult>('/ask', { question });
+export const search = (request: SearchRequest) => api.post<SearchResult[]>('/search', request);
+export const askQuestion = (question: string) => api.post<AnswerResult>('/qa/ask', { question });
+export const searchByTag = (tag: string, limit = 20) =>
+  api.get<SearchResult[]>('/search/by-tag', { params: { tag, limit } });
+export const searchByRelation = (nodeId: string, relationType?: string, limit = 20) =>
+  api.get<SearchResult[]>('/search/by-relation', { params: { nodeId, relationType, limit } });
 
 // ==================== Knowledge Graph ====================
 export interface GraphNode {
