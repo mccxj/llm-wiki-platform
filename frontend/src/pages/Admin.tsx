@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Typography, Card, Table, Button, Space, Tag, message, Modal, Input, Descriptions, Progress, Divider, List } from 'antd';
 import { SettingOutlined, ToolOutlined, ReloadOutlined, WarningOutlined, CopyOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import { getConfig, updateConfig, getMaintenanceReport } from '../api';
+import { getConfig, updateConfig, getMaintenanceReport, MaintenanceReport } from '../api';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -13,22 +13,21 @@ interface ConfigItem {
   updatedAt?: string;
 }
 
-interface MaintenanceReport {
-  generatedAt: string;
-  totalPages: number;
-  orphanCount: number;
-  staleCount: number;
-  duplicateGroups: number;
-  contradictionCount: number;
-  orphans: any[];
-  stalePages: any[];
-  duplicates: any[][];
-  contradictions: any[];
+interface MaintenanceReportItem {
+  id?: string;
+  title?: string;
+}
+
+interface MaintenanceReportExtended extends MaintenanceReport {
+  orphans?: MaintenanceReportItem[];
+  stalePages?: MaintenanceReportItem[];
+  duplicates?: MaintenanceReportItem[][];
+  contradictions?: MaintenanceReportItem[];
 }
 
 export default function Admin() {
   const [configs, setConfigs] = useState<ConfigItem[]>([]);
-  const [report, setReport] = useState<MaintenanceReport | null>(null);
+  const [report, setReport] = useState<MaintenanceReportExtended | null>(null);
   const [loading, setLoading] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
@@ -131,13 +130,13 @@ export default function Admin() {
           <Divider />
 
           {/* Orphans list */}
-          {report.orphans.length > 0 && (
+          {report.orphans && report.orphans.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <Text strong><WarningOutlined style={{ color: '#faad14' }} /> 孤儿页面</Text>
               <List
                 size="small"
                 dataSource={report.orphans}
-                renderItem={(item: any) => (
+                renderItem={(item: MaintenanceReportItem) => (
                   <List.Item><Text>{item.title}</Text> <Text type="secondary">({item.id?.substring(0, 8)}...)</Text></List.Item>
                 )}
                 style={{ marginTop: 8 }}
@@ -146,13 +145,13 @@ export default function Admin() {
           )}
 
           {/* Contradictions list */}
-          {report.contradictions.length > 0 && (
+          {report.contradictions && report.contradictions.length > 0 && (
             <div>
               <Text strong><ExclamationCircleOutlined style={{ color: '#ff4d4f' }} /> 矛盾页面</Text>
               <List
                 size="small"
                 dataSource={report.contradictions}
-                renderItem={(item: any) => (
+                renderItem={(item: MaintenanceReportItem) => (
                   <List.Item><Text>{item.title}</Text> <Text type="secondary">({item.id?.substring(0, 8)}...)</Text></List.Item>
                 )}
                 style={{ marginTop: 8 }}
