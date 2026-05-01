@@ -2,6 +2,8 @@ package com.llmwiki.web.controller;
 
 import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageRepository;
+import com.llmwiki.domain.pipeline.entity.DeadLetterQueue;
+import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.entity.ProcessingLog;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
@@ -26,6 +28,7 @@ class PipelineControllerTest {
     @Mock RawDocumentRepository rawDocRepo;
     @Mock ProcessingLogRepository procLogRepo;
     @Mock PageRepository pageRepo;
+    @Mock DeadLetterQueueRepository deadLetterQueueRepo;
     @InjectMocks PipelineController controller;
 
     @Test
@@ -103,5 +106,81 @@ class PipelineControllerTest {
         var response = controller.getPage(id);
 
         assertEquals(404, response.getStatusCodeValue());
+    }
+
+    // ===== Dead Letter Queue Tests =====
+
+    @Test
+    void getDeadLetters_shouldReturnAllWhenNoStatus() {
+        List<DeadLetterQueue> dlqs = List.of(
+                DeadLetterQueue.builder().step("SCORE").build(),
+                DeadLetterQueue.builder().step("ENTITY_EXTRACTION").build());
+        when(deadLetterQueueRepo.findAll()).thenReturn(dlqs);
+
+        var response = controller.getDeadLetters(null);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(2, response.getBody().size());
+        verify(deadLetterQueueRepo).findAll();
+    }
+
+    @Test
+    void getDeadLetters_shouldFilterByStatus() {
+        List<DeadLetterQueue> dlqs = List.of(
+                DeadLetterQueue.builder().step("SCORE").status("PENDING").build());
+        when(deadLetterQueueRepo.findByStatus("PENDING")).thenReturn(dlqs);
+
+        var response = controller.getDeadLetters("PENDING");
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(1, response.getBody().size());
+        verify(deadLetterQueueRepo).findByStatus("PENDING");
+    }
+
+    @Test
+    void retryDeadLetter_shouldReturnOkOnSuccess() {
+        UUID dlqId = UUID.randomUUID();
+        doNothing().when(pipelineService).retryDeadLetter(dlqId);
+
+        var response = controller.retryDeadLetter(dlqId);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertTrue(response.getBody().toString().contains("retried successfully"));
+        verify(pipelineService).retryDeadLetter(dlqId);
+    }
+
+    @Test
+    void retryDeadLetter_shouldReturn400OnIllegalArgument() {
+        UUID dlqId = UUID.randomUUID();
+        doThrow(new IllegalArgumentException("Dead letter not found"))
+                .when(pipelineService).retryDeadLetter(dlqId);
+
+        var response = controller.retryDeadLetter(dlqId);
+
+        assertEquals(400, response.getStatusCodeValue());
+        assertTrue(response.getBody().toString().contains("Dead letter not found"));
+    }
+
+    @Test
+    void retryDeadLetter_shouldReturn400OnIllegalState() {
+        UUID dlqId = UUID.randomUUID();
+        doThrow(new IllegalStateException("Cannot retry dead letter with status: RESOLVED"))
+                .when(pipelineService).retryDeadLetter(dlqId);
+
+        var response = controller.retryDeadLetter(dlqId);
+
+        assertEquals(400, response.getStatusCodeValue());
+    }
+
+    @Test
+    void retryDeadLetter_shouldReturn500OnGeneralError() {
+        UUID dlqId = UUID.randomUUID();
+        doThrow(new RuntimeException("Pipeline failed"))
+                .when(pipelineService).retryDeadLetter(dlqId);
+
+        var response = controller.retryDeadLetter(dlqId);
+
+        assertEquals(500, response.getStatusCodeValue());
+        assertTrue(response.getBody().toString().contains("Retry failed"));
     }
 }

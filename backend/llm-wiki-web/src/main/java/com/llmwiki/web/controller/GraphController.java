@@ -63,6 +63,25 @@ public class GraphController {
         return ResponseEntity.ok(graphService.createEdge(sourceId, targetId, type, weight));
     }
 
+    /**
+     * Find shortest path between two nodes (BFS).
+     * GET /api/graph/path?from=xxx&to=yyy
+     */
+    @GetMapping("/path")
+    public ResponseEntity<Map<String, Object>> getPath(@RequestParam UUID from, @RequestParam UUID to) {
+        List<UUID> path = graphService.findShortestPath(from, to);
+        return ResponseEntity.ok(Map.of("path", path, "length", path.size()));
+    }
+
+    /**
+     * Get graph statistics.
+     * GET /api/graph/stats
+     */
+    @GetMapping("/stats")
+    public ResponseEntity<Map<String, Object>> getStats() {
+        return ResponseEntity.ok(graphService.getGraphStats());
+    }
+
     @DeleteMapping("/nodes/{nodeId}")
     public ResponseEntity<Void> deleteNode(@PathVariable UUID nodeId) {
         graphService.deleteNode(nodeId);
