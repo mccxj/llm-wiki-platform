@@ -156,6 +156,76 @@ public class KnowledgeGraphService {
     }
 
     /**
+     * Find shortest path between two nodes using BFS.
+     */
+    public List<UUID> findShortestPath(UUID from, UUID to) {
+        if (from.equals(to)) return List.of(from);
+
+        // BFS
+        Map<UUID, UUID> parentMap = new HashMap<>();
+        Set<UUID> visited = new HashSet<>();
+        Queue<UUID> queue = new LinkedList<>();
+        queue.add(from);
+        visited.add(from);
+
+        while (!queue.isEmpty()) {
+            UUID current = queue.poll();
+
+            // Get all neighbors
+            Set<UUID> neighbors = new HashSet<>();
+            edgeRepo.findBySourceNodeId(current).forEach(e -> neighbors.add(e.getTargetNodeId()));
+            edgeRepo.findByTargetNodeId(current).forEach(e -> neighbors.add(e.getSourceNodeId()));
+
+            for (UUID neighbor : neighbors) {
+                if (!visited.contains(neighbor)) {
+                    visited.add(neighbor);
+                    parentMap.put(neighbor, current);
+                    if (neighbor.equals(to)) {
+                        // Reconstruct path
+                        List<UUID> path = new ArrayList<>();
+                        UUID node = to;
+                        while (node != null) {
+                            path.add(0, node);
+                            node = parentMap.get(node);
+                        }
+                        return path;
+                    }
+                    queue.add(neighbor);
+                }
+            }
+        }
+
+        return Collections.emptyList(); // No path found
+    }
+
+    /**
+     * Get graph statistics.
+     */
+    public Map<String, Object> getGraphStats() {
+        long nodeCount = nodeRepo.count();
+        long edgeCount = edgeRepo.count();
+        List<KgNode> orphans = findOrphans();
+
+        Map<String, Long> nodeTypeCounts = new HashMap<>();
+        for (NodeType type : NodeType.values()) {
+            nodeTypeCounts.put(type.name(), nodeRepo.countByNodeType(type));
+        }
+
+        Map<String, Long> edgeTypeCounts = new HashMap<>();
+        for (EdgeType type : EdgeType.values()) {
+            edgeTypeCounts.put(type.name(), edgeRepo.countByEdgeType(type));
+        }
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("totalNodes", nodeCount);
+        stats.put("totalEdges", edgeCount);
+        stats.put("orphanCount", orphans.size());
+        stats.put("nodeTypeCounts", nodeTypeCounts);
+        stats.put("edgeTypeCounts", edgeTypeCounts);
+        return stats;
+    }
+
+    /**
      * DTOs for graph visualization.
      */
     public static class GraphData {

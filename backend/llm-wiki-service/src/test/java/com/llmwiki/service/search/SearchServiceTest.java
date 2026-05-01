@@ -2,12 +2,18 @@ package com.llmwiki.service.search;
 
 import com.llmwiki.adapter.api.AiApiClient;
 import com.llmwiki.adapter.api.EmbeddingClient;
+import com.llmwiki.common.dto.SearchRequest;
+import com.llmwiki.common.enums.EdgeType;
 import com.llmwiki.common.enums.NodeType;
 import com.llmwiki.common.enums.PageStatus;
+import com.llmwiki.domain.graph.entity.KgEdge;
 import com.llmwiki.domain.graph.entity.KgNode;
+import com.llmwiki.domain.graph.repository.KgEdgeRepository;
 import com.llmwiki.domain.graph.repository.KgNodeRepository;
 import com.llmwiki.domain.page.entity.Page;
+import com.llmwiki.domain.page.entity.PageTag;
 import com.llmwiki.domain.page.repository.PageRepository;
+import com.llmwiki.domain.page.repository.PageTagRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.Query;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,7 +35,9 @@ class SearchServiceTest {
 
     @Mock EntityManager entityManager;
     @Mock KgNodeRepository nodeRepo;
+    @Mock KgEdgeRepository edgeRepo;
     @Mock PageRepository pageRepo;
+    @Mock PageTagRepository pageTagRepo;
     @Mock AiApiClient aiClient;
     @Mock EmbeddingClient embeddingClient;
     @Mock Query nativeQuery;
@@ -75,7 +83,8 @@ class SearchServiceTest {
         when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
         when(pageRepo.findById(pageId)).thenReturn(Optional.of(page));
 
-        List<SearchService.SearchResult> results = searchService.search("java", 5);
+        SearchRequest request = SearchRequest.builder().query("java").limit(5).build();
+        List<SearchService.SearchResult> results = searchService.search(request);
 
         assertEquals(1, results.size());
         SearchService.SearchResult result = results.get(0);
@@ -94,7 +103,8 @@ class SearchServiceTest {
         when(embeddingClient.embed("unknown")).thenReturn(queryEmbedding);
         setupVectorSearch(Collections.emptyList());
 
-        List<SearchService.SearchResult> results = searchService.search("unknown", 5);
+        SearchRequest request = SearchRequest.builder().query("unknown").limit(5).build();
+        List<SearchService.SearchResult> results = searchService.search(request);
 
         assertTrue(results.isEmpty());
     }
@@ -105,11 +115,134 @@ class SearchServiceTest {
         when(nodeRepo.findByNameContaining("java")).thenReturn(List.of(node));
         when(pageRepo.findById(pageId)).thenReturn(Optional.of(page));
 
-        List<SearchService.SearchResult> results = searchService.search("java", 5);
+        SearchRequest request = SearchRequest.builder().query("java").limit(5).build();
+        List<SearchService.SearchResult> results = searchService.search(request);
 
         assertEquals(1, results.size());
         assertEquals("Java", results.get(0).nodeName);
         assertEquals(0.5, results.get(0).similarity);
+    }
+
+    @Test
+    void search_legacyMethod_shouldWork() {
+        float[] queryEmbedding = new float[1536];
+        Object[] row = {nodeId, 0.5};
+        List<Object[]> rows = Collections.singletonList(row);
+
+        when(embeddingClient.embed("java")).thenReturn(queryEmbedding);
+        setupVectorSearch(rows);
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
+        when(pageRepo.findById(pageId)).thenReturn(Optional.of(page));
+
+        List<SearchService.SearchResult> results = searchService.search("java", 5);
+
+        assertEquals(1, results.size());
+        assertEquals("Java", results.get(0).nodeName);
+    }
+
+    @Test
+    void search_shouldFilterByType() {
+        float[] queryEmbedding = new float[1536];
+        queryEmbedding[0] = 1.0f;
+
+        UUID nodeId2 = UUID.randomUUID();
+        KgNode conceptNode = KgNode.builder()
+                .id(nodeId2).name("OOP").nodeType(NodeType.CONCEPT)
+                .description("Object-oriented programming").build();
+
+        Object[] row1 = {nodeId, 0.3};
+        Object[] row2 = {nodeId2, 0.5};
+
+        when(embeddingClient.embed("test")).thenReturn(queryEmbedding);
+        setupVectorSearch(List.of(row1, row2));
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
+        when(nodeRepo.findById(nodeId2)).thenReturn(Optional.of(conceptNode));
+        when(pageRepo.findById(pageId)).thenReturn(Optional.of(page));
+
+        SearchRequest request = SearchRequest.builder()
+                .query("test")
+                .types(List.of("ENTITY"))
+                .limit(10)
+                .build();
+        List<SearchService.SearchResult> results = searchService.search(request);
+
+        assertEquals(1, results.size());
+        assertEquals("ENTITY", results.get(0).nodeType);
+    }
+
+    @Test
+    void searchByTag_shouldReturnResultsFromPageTags() {
+        UUID tagPageId = UUID.randomUUID();
+        PageTag pageTag = PageTag.builder().pageId(tagPageId).tag("java").build();
+        KgNode taggedNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Spring").nodeType(NodeType.ENTITY)
+                .description("Spring framework").pageId(tagPageId).build();
+        Page taggedPage = Page.builder()
+                .id(tagPageId).title("Spring Framework").slug("spring")
+                .content("Spring is a framework...").status(PageStatus.APPROVED).build();
+
+        when(pageTagRepo.findAll()).thenReturn(List.of(pageTag));
+        when(pageRepo.findById(tagPageId)).thenReturn(Optional.of(taggedPage));
+        when(nodeRepo.findAll()).thenReturn(List.of(taggedNode));
+
+        List<SearchService.SearchResult> results = searchService.searchByTag("java", 20);
+
+        assertFalse(results.isEmpty());
+        assertEquals("Spring", results.get(0).nodeName);
+    }
+
+    @Test
+    void searchByTag_shouldFallbackToNameMatch() {
+        when(pageTagRepo.findAll()).thenReturn(Collections.emptyList());
+        when(nodeRepo.findByNameContaining("python")).thenReturn(List.of(node));
+
+        List<SearchService.SearchResult> results = searchService.searchByTag("python", 20);
+
+        assertFalse(results.isEmpty());
+        assertEquals("Java", results.get(0).nodeName);
+    }
+
+    @Test
+    void searchByRelation_shouldReturnRelatedNodes() {
+        UUID relatedNodeId = UUID.randomUUID();
+        KgNode relatedNode = KgNode.builder()
+                .id(relatedNodeId).name("Kotlin").nodeType(NodeType.ENTITY)
+                .description("Kotlin language").build();
+        KgEdge edge = KgEdge.builder()
+                .sourceNodeId(nodeId).targetNodeId(relatedNodeId)
+                .edgeType(EdgeType.RELATED_TO).build();
+
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
+        when(edgeRepo.findBySourceNodeId(nodeId)).thenReturn(List.of(edge));
+        when(edgeRepo.findByTargetNodeId(nodeId)).thenReturn(Collections.emptyList());
+        when(nodeRepo.findById(relatedNodeId)).thenReturn(Optional.of(relatedNode));
+
+        List<SearchService.SearchResult> results = searchService.searchByRelation(nodeId, "RELATED_TO", 20);
+
+        assertTrue(results.size() >= 2); // source node + related node
+        assertTrue(results.stream().anyMatch(r -> r.nodeName.equals("Java")));
+        assertTrue(results.stream().anyMatch(r -> r.nodeName.equals("Kotlin")));
+    }
+
+    @Test
+    void searchByRelation_shouldIncludeSourceNode() {
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
+        when(edgeRepo.findBySourceNodeId(nodeId)).thenReturn(Collections.emptyList());
+        when(edgeRepo.findByTargetNodeId(nodeId)).thenReturn(Collections.emptyList());
+
+        List<SearchService.SearchResult> results = searchService.searchByRelation(nodeId, null, 20);
+
+        assertEquals(1, results.size());
+        assertEquals("Java", results.get(0).nodeName);
+    }
+
+    @Test
+    void searchByRelation_shouldHandleEmptySource() {
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.empty());
+
+        List<SearchService.SearchResult> results = searchService.searchByRelation(nodeId, "RELATED_TO", 20);
+
+        assertTrue(results.isEmpty());
     }
 
     @Test

@@ -21,6 +21,8 @@ import com.llmwiki.domain.page.entity.PageTag;
 import com.llmwiki.domain.page.repository.PageLinkRepository;
 import com.llmwiki.domain.page.repository.PageRepository;
 import com.llmwiki.domain.page.repository.PageTagRepository;
+import com.llmwiki.domain.pipeline.entity.DeadLetterQueue;
+import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.entity.ProcessingLog;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
@@ -40,6 +42,8 @@ import java.util.*;
 @Slf4j
 public class PipelineService {
 
+    private static final int DEFAULT_MAX_RETRIES = 3;
+
     private final RawDocumentRepository rawDocRepo;
     private final ProcessingLogRepository procLogRepo;
     private final KgNodeRepository kgNodeRepo;
@@ -49,6 +53,7 @@ public class PipelineService {
     private final PageLinkRepository pageLinkRepo;
     private final PageTagRepository pageTagRepo;
     private final ApprovalQueueRepository approvalQueueRepo;
+    private final DeadLetterQueueRepository deadLetterQueueRepo;
     private final SystemConfigRepository configRepo;
 
     private final AiApiClient aiClient;
@@ -62,7 +67,12 @@ public class PipelineService {
         log.info("Starting pipeline for document: {} ({})", doc.getTitle(), doc.getId());
 
         BigDecimal threshold = getScoreThreshold();
-        ScoreResult scoreResult = scoreDocument(doc);
+
+        // Step 1: Score
+        ScoreResult scoreResult = executeWithRetry(rawDocId, "SCORE", () -> scoreDocument(doc));
+        if (scoreResult == null) {
+            return; // already in DLQ
+        }
         if (scoreResult.getOverallScore().compareTo(threshold) < 0) {
             log.info("Document {} score {} below threshold {}, skipping", doc.getId(), scoreResult.getOverallScore(), threshold);
             saveStepLog(rawDocId, "SCORE", StepStatus.SKIPPED, "Score " + scoreResult.getOverallScore() + " below threshold " + threshold);
@@ -70,29 +80,140 @@ public class PipelineService {
         }
         saveStepLog(rawDocId, "SCORE", StepStatus.SUCCESS, scoreResult.getReason());
 
-        ExtractionResult entities = extractEntities(doc);
+        // Step 2: Entity Extraction
+        ExtractionResult entities = executeWithRetry(rawDocId, "ENTITY_EXTRACTION", () -> extractEntities(doc));
+        if (entities == null) return;
         saveStepLog(rawDocId, "ENTITY_EXTRACTION", StepStatus.SUCCESS, "Extracted " + entities.getEntities().size() + " entities");
 
-        ExtractionResult concepts = extractConcepts(doc);
+        // Step 3: Concept Extraction
+        ExtractionResult concepts = executeWithRetry(rawDocId, "CONCEPT_EXTRACTION", () -> extractConcepts(doc));
+        if (concepts == null) return;
         saveStepLog(rawDocId, "CONCEPT_EXTRACTION", StepStatus.SUCCESS, "Extracted " + concepts.getConcepts().size() + " concepts");
 
-        List<KgNode> matchedNodes = matchKnowledgeGraph(entities, concepts);
+        // Step 4: Graph Matching
+        List<KgNode> matchedNodes = executeWithRetry(rawDocId, "GRAPH_MATCHING", () -> matchKnowledgeGraph(entities, concepts));
+        if (matchedNodes == null) return;
         saveStepLog(rawDocId, "GRAPH_MATCHING", StepStatus.SUCCESS, "Matched " + matchedNodes.size() + " graph nodes");
 
-        Page page = generatePage(doc, scoreResult, entities, concepts);
+        // Step 5: Page Generation
+        Page page = executeWithRetry(rawDocId, "PAGE_GENERATION", () -> generatePage(doc, scoreResult, entities, concepts));
+        if (page == null) return;
         saveStepLog(rawDocId, "PAGE_GENERATION", StepStatus.SUCCESS, "Generated page: " + page.getSlug());
 
-        // Auto-submit for approval
-        submitForApproval(page.getId(), ApprovalAction.CREATE, "Auto-submitted after pipeline processing");
+        // Step 6: Approval Submission
+        executeWithRetry(rawDocId, "APPROVAL_SUBMISSION", () -> {
+            submitForApproval(page.getId(), ApprovalAction.CREATE, "Auto-submitted after pipeline processing");
+            return null;
+        });
         saveStepLog(rawDocId, "APPROVAL_SUBMISSION", StepStatus.SUCCESS, "Submitted for approval: " + page.getId());
 
-        int links = autoCrossLink(page, matchedNodes);
-        saveStepLog(rawDocId, "CROSS_LINKING", StepStatus.SUCCESS, "Created " + links + " cross-links");
+        // Step 7: Cross Linking
+        Integer links = executeWithRetry(rawDocId, "CROSS_LINKING", () -> autoCrossLink(page, matchedNodes));
+        saveStepLog(rawDocId, "CROSS_LINKING", StepStatus.SUCCESS, "Created " + (links != null ? links : 0) + " cross-links");
 
+        // Step 8: Consistency Check
         boolean consistent = consistencyCheck(page);
         saveStepLog(rawDocId, "CONSISTENCY_CHECK", consistent ? StepStatus.SUCCESS : StepStatus.FAILED, consistent ? "OK" : "Issues found");
 
         log.info("Pipeline completed for document: {}", doc.getId());
+    }
+
+    /**
+     * Execute a pipeline step with retry. Returns null if all retries exhausted and saved to DLQ.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> T executeWithRetry(UUID rawDocId, String stepName, PipelineStep<T> step) {
+        int maxRetries = getMaxRetries();
+        Exception lastException = null;
+
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                T result = step.execute();
+                if (attempt > 1) {
+                    log.info("Step {} succeeded on attempt {} for document {}", stepName, attempt, rawDocId);
+                }
+                return result;
+            } catch (Exception e) {
+                lastException = e;
+                log.warn("Step {} failed (attempt {}/{}) for document {}: {}",
+                        stepName, attempt, maxRetries, rawDocId, e.getMessage());
+
+                if (attempt < maxRetries) {
+                    // Exponential backoff: 1s, 2s, 4s...
+                    long backoffMs = (long) Math.pow(2, attempt - 1) * 1000;
+                    try {
+                        Thread.sleep(backoffMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+
+        // All retries exhausted — save to DLQ
+        String errorMsg = lastException != null ? lastException.getMessage() : "Unknown error";
+        log.error("Step {} failed after {} retries for document {}, saving to DLQ", stepName, maxRetries, rawDocId);
+        saveToDeadLetterQueue(rawDocId, stepName, errorMsg, maxRetries);
+        saveStepLog(rawDocId, stepName, StepStatus.FAILED, errorMsg);
+        return null;
+    }
+
+    private void saveToDeadLetterQueue(UUID rawDocId, String step, String errorMessage, int retryCount) {
+        DeadLetterQueue dlq = DeadLetterQueue.builder()
+                .rawDocumentId(rawDocId)
+                .step(step)
+                .errorMessage(errorMessage)
+                .retryCount(retryCount)
+                .maxRetries(retryCount)
+                .status("PENDING")
+                .build();
+        deadLetterQueueRepo.save(dlq);
+    }
+
+    private int getMaxRetries() {
+        return configRepo.findByKey("pipeline.max.retries")
+                .map(c -> {
+                    try {
+                        return Integer.parseInt(c.getValue());
+                    } catch (NumberFormatException e) {
+                        return DEFAULT_MAX_RETRIES;
+                    }
+                })
+                .orElse(DEFAULT_MAX_RETRIES);
+    }
+
+    /**
+     * Retry a dead letter entry by raw document ID.
+     */
+    @Transactional
+    public void retryDeadLetter(UUID deadLetterId) {
+        DeadLetterQueue dlq = deadLetterQueueRepo.findById(deadLetterId)
+                .orElseThrow(() -> new IllegalArgumentException("Dead letter not found: " + deadLetterId));
+
+        if (!"PENDING".equals(dlq.getStatus()) && !"FAILED".equals(dlq.getStatus())) {
+            throw new IllegalStateException("Cannot retry dead letter with status: " + dlq.getStatus());
+        }
+
+        log.info("Retrying dead letter {} for document {} step {}", deadLetterId, dlq.getRawDocumentId(), dlq.getStep());
+
+        // Reset status and increment retry count
+        dlq.setStatus("RETRYING");
+        dlq.setRetryCount(dlq.getRetryCount() + 1);
+        deadLetterQueueRepo.save(dlq);
+
+        try {
+            processDocument(dlq.getRawDocumentId());
+            dlq.setStatus("RESOLVED");
+            deadLetterQueueRepo.save(dlq);
+            log.info("Dead letter {} resolved successfully", deadLetterId);
+        } catch (Exception e) {
+            dlq.setStatus("FAILED");
+            dlq.setErrorMessage(e.getMessage());
+            deadLetterQueueRepo.save(dlq);
+            log.error("Dead letter {} retry failed: {}", deadLetterId, e.getMessage());
+            throw e;
+        }
     }
 
     private void submitForApproval(UUID pageId, ApprovalAction action, String comment) {
@@ -305,5 +426,13 @@ public class PipelineService {
                 .status(status)
                 .detail(detail)
                 .build());
+    }
+
+    /**
+     * Functional interface for pipeline steps that can throw exceptions.
+     */
+    @FunctionalInterface
+    private interface PipelineStep<T> {
+        T execute() throws Exception;
     }
 }
