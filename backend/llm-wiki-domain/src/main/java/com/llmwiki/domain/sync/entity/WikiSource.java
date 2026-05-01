@@ -16,6 +16,11 @@ public class WikiSource {
     @Column(nullable = false)
     private String name;
 
+    /**
+     * Base URL of the wiki source (e.g. "https://wiki.example.com")
+     */
+    private String baseUrl;
+
     @Column(nullable = false)
     private String adapterClass;
 
