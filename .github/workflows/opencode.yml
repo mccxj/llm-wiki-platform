@@ -38,13 +38,6 @@ jobs:
           code-review-graph install --platform opencode
       - name: Build code-review-graph
         run: code-review-graph build
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: "npm"
-      - name: Install dependencies
-        run: npm ci
       - name: Setup configuration
         run: |
           mkdir -p ~/.config/opencode
