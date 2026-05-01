@@ -221,7 +221,7 @@ export default function Search() {
         />
       </div>
 
-      {tagLoading && <Spin tag="搜索中..." style={{ display: 'block', textAlign: 'center', padding: 40 }} />}
+      {tagLoading && <Spin tip="搜索中..." style={{ display: 'block', textAlign: 'center', padding: 40 }} />}
 
       {tagResults.length > 0 && (
         <List
