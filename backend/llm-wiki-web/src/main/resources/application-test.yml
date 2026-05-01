@@ -14,6 +14,10 @@ spring:
   flyway:
     enabled: false
 
+jwt:
+  secret: test-jwt-secret-key-at-least-256-bits-long-for-hs256-algorithm
+  expiration: 86400000
+
 ai:
   api:
     base-url: http://localhost:9999
