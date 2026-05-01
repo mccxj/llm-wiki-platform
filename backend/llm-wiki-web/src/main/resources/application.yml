@@ -51,5 +51,8 @@ sync:
   default-cron: "0 0 */6 * * *"
 
 jwt:
-  secret: ${JWT_SECRET:llm-wiki-platform-secret-key-at-least-256-bits-long-for-hs256}
+  secret: ${JWT_SECRET:}
   expiration: 86400000  # 24小时
+
+encryption:
+  key: ${ENCRYPTION_KEY:llm-wiki-default-key-32chars-long!}
