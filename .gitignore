@@ -1,0 +1,33 @@
+# Compiled
+*.class
+target/
+build/
+dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Node
+node_modules/
+
+# Docker
+docker-compose.override.yml
+
+# Maven
+.mvn/

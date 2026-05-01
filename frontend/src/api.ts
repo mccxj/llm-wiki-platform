@@ -1,0 +1,116 @@
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: '/api',
+  timeout: 30000
+});
+
+// ==================== Pipeline ====================
+export interface SyncLog {
+  id: string;
+  sourceId: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: string;
+  fetchedCount: number;
+  processedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  errorMessage?: string;
+}
+
+export interface Page {
+  id: string;
+  title: string;
+  slug: string;
+  content: string;
+  pageType: string;
+  status: string;
+  aiScore: number;
+  createdAt: string;
+  publishedAt?: string;
+}
+
+export interface ProcessingLog {
+  id: string;
+  step: string;
+  status: string;
+  score: number;
+  detail: string;
+  startedAt: string;
+}
+
+export const triggerSync = (sourceId: string) => api.post(`/sync/trigger/${sourceId}`);
+export const triggerSyncAll = () => api.post('/sync/trigger-all');
+export const getSyncLogs = () => api.get<SyncLog[]>('/sync/logs');
+export const getSyncSources = () => api.get('/sync/sources');
+export const getPages = (status = 'ALL') => api.get<Page[]>('/pipeline/pages', { params: { status } });
+export const getPage = (id: string) => api.get<Page>(`/pipeline/pages/${id}`);
+export const processDocument = (rawDocId: string) => api.post(`/pipeline/process/${rawDocId}`);
+export const getProcessingLogs = (rawDocId: string) => api.get<ProcessingLog[]>(`/pipeline/logs/${rawDocId}`);
+export const getPendingDocs = () => api.get('/pipeline/pending');
+
+// ==================== Approvals ====================
+export interface ApprovalItem {
+  id: string;
+  pageId: string;
+  action: string;
+  status: string;
+  comment?: string;
+  reviewerId?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+
+export const getApprovals = (status = 'PENDING') => api.get<ApprovalItem[]>('/approvals', { params: { status } });
+export const approvePage = (approvalId: string, comment = '') =>
+  api.post(`/approvals/approve/${approvalId}`, { reviewerId: 'admin', comment });
+export const rejectPage = (approvalId: string, comment = '') =>
+  api.post(`/approvals/reject/${approvalId}`, { reviewerId: 'admin', comment });
+
+// ==================== Search & Q&A ====================
+export interface SearchResult {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+  description?: string;
+  similarity: number;
+  pageTitle?: string;
+  pageSlug?: string;
+  pageContent?: string;
+}
+
+export interface AnswerResult {
+  answer: string;
+  source: string;
+  citations: string[];
+}
+
+export const search = (q: string, limit = 10) => api.get<SearchResult[]>('/search', { params: { q, limit } });
+export const askQuestion = (question: string) => api.post<AnswerResult>('/ask', { question });
+
+// ==================== Knowledge Graph ====================
+export interface GraphNode {
+  id: string;
+  name: string;
+  type: string;
+  description?: string;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: string;
+  weight: number;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export const getGraphData = () => api.get<GraphData>('/graph');
+export const getNeighborhood = (nodeId: string) => api.get<GraphData>(`/graph/neighborhood/${nodeId}`);
+export const getOrphans = () => api.get<GraphNode[]>('/graph/orphans');
+
+export default api;
