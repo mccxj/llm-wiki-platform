@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Button, Space, Typography, message } from 'antd';
+import { Table, Tag, Button, Space, Typography, message, Spin } from 'antd';
 import { useNavigate } from 'react-router-dom';
-import { getPages, processDocument } from '../api';
+import { getPages, Page } from '../api';
 
 const { Title } = Typography;
 
@@ -20,7 +20,7 @@ const statusLabels: Record<string, string> = {
 };
 
 export default function Pages() {
-  const [pages, setPages] = useState<any[]>([]);
+  const [pages, setPages] = useState<Page[]>([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -30,7 +30,7 @@ export default function Pages() {
       const res = await getPages();
       setPages(res.data);
     } catch (e) {
-      message.error('加载失败');
+      message.error('加载页面列表失败');
     }
     setLoading(false);
   };
@@ -49,7 +49,7 @@ export default function Pages() {
         rowKey="id"
         loading={loading}
         columns={[
-          { title: '标题', dataIndex: 'title', key: 'title', render: (t: string, r: any) => (
+          { title: '标题', dataIndex: 'title', key: 'title', render: (t: string, r: Page) => (
             <a onClick={() => navigate(`/pages/${r.id}`)}>{t}</a>
           )},
           { title: '类型', dataIndex: 'pageType', key: 'pageType', width: 100 },

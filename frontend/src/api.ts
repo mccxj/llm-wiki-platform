@@ -44,8 +44,11 @@ export const triggerSync = (sourceId: string) => api.post(`/sync/trigger/${sourc
 export const triggerSyncAll = () => api.post('/sync/trigger-all');
 export const getSyncLogs = () => api.get<SyncLog[]>('/sync/logs');
 export const getSyncSources = () => api.get('/sync/sources');
-export const getPages = (status = 'ALL') => api.get<Page[]>('/pipeline/pages', { params: { status } });
-export const getPage = (id: string) => api.get<Page>(`/pipeline/pages/${id}`);
+export const getPages = (status = 'ALL') => api.get<Page[]>('/pages', { params: { status } });
+export const getPage = (id: string) => api.get<Page>(`/pages/${id}`);
+export const deletePage = (id: string) => api.delete(`/pages/${id}`);
+export const getPageLinks = (id: string) => api.get(`/pages/${id}/links`);
+export const getPageHistory = (id: string) => api.get<ProcessingLog[]>(`/pages/${id}/history`);
 export const processDocument = (rawDocId: string) => api.post(`/pipeline/process/${rawDocId}`);
 export const getProcessingLogs = (rawDocId: string) => api.get<ProcessingLog[]>(`/pipeline/logs/${rawDocId}`);
 export const getPendingDocs = () => api.get('/pipeline/pending');
@@ -112,5 +115,68 @@ export interface GraphData {
 export const getGraphData = () => api.get<GraphData>('/graph');
 export const getNeighborhood = (nodeId: string) => api.get<GraphData>(`/graph/neighborhood/${nodeId}`);
 export const getOrphans = () => api.get<GraphNode[]>('/graph/orphans');
+
+// ==================== Admin ====================
+export interface SystemConfig {
+  key: string;
+  value: string;
+  description?: string;
+  updatedAt?: string;
+}
+
+export interface MaintenanceReport {
+  generatedAt: string;
+  totalPages: number;
+  orphanCount: number;
+  staleCount: number;
+  duplicateGroups: number;
+  contradictionCount: number;
+}
+
+export const getConfig = () => api.get<SystemConfig[]>('/admin/config');
+export const updateConfig = (key: string, body: { value: string; description?: string }) =>
+  api.put<SystemConfig>(`/admin/config/${key}`, body);
+export const triggerOrphanCheck = () => api.post('/admin/maintenance/orphans');
+export const triggerStaleCheck = (days = 30) => api.post('/admin/maintenance/stale', null, { params: { days } });
+export const triggerDuplicateCheck = () => api.post('/admin/maintenance/duplicates');
+export const triggerContradictionCheck = () => api.post('/admin/maintenance/contradictions');
+export const getMaintenanceReport = () => api.get<MaintenanceReport>('/admin/reports/maintenance');
+
+// ==================== Auth ====================
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  username: string;
+  role: string;
+}
+
+export const login = (data: LoginRequest) => api.post<LoginResponse>('/auth/login', data);
+export const register = (data: LoginRequest) => api.post<LoginResponse>('/auth/register', data);
+export const verifyToken = () => api.get('/auth/verify');
+
+// 请求拦截器：自动添加Token
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// 响应拦截器：处理401
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      window.location.href = '/';
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default api;

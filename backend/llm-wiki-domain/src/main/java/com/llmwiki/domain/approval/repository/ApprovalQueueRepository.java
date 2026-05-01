@@ -12,4 +12,5 @@ public interface ApprovalQueueRepository extends JpaRepository<ApprovalQueue, UU
     List<ApprovalQueue> findByStatus(String status);
     List<ApprovalQueue> findByStatusOrderByCreatedAtAsc(String status);
     long countByStatus(String status);
+    List<ApprovalQueue> findByPageId(UUID pageId);
 }

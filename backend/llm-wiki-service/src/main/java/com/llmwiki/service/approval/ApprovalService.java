@@ -86,4 +86,11 @@ public class ApprovalService {
     public List<ApprovalQueue> listByStatus(String status) {
         return approvalRepo.findByStatus(status);
     }
+
+    /**
+     * 获取页面的审批历史
+     */
+    public List<ApprovalQueue> getApprovalHistory(UUID pageId) {
+        return approvalRepo.findByPageId(pageId);
+    }
 }
