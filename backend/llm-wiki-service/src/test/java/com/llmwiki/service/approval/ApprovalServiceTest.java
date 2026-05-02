@@ -4,6 +4,7 @@ import com.llmwiki.common.enums.ApprovalAction;
 import com.llmwiki.common.enums.ApprovalStatus;
 import com.llmwiki.common.enums.PageStatus;
 import com.llmwiki.domain.approval.entity.ApprovalQueue;
+import com.llmwiki.domain.approval.repository.ApprovalAuditRepository;
 import com.llmwiki.domain.approval.repository.ApprovalQueueRepository;
 import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageRepository;
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.*;
 class ApprovalServiceTest {
 
     @Mock ApprovalQueueRepository approvalRepo;
+    @Mock ApprovalAuditRepository auditRepo;
     @Mock PageRepository pageRepo;
 
     @InjectMocks

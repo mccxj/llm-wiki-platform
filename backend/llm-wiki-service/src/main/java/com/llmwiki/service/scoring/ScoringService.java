@@ -68,10 +68,7 @@ public class ScoringService {
     }
 
     /**
-     * 判断评分结果是否通过阈值。
-     *
-     * @param result 评分结果
-     * @return true 如果通过阈值
+     * 判断评分结果是否通过全局阈值。
      */
     public boolean passesThreshold(ScoreResult result) {
         if (result == null || result.getOverallScore() == null) {
@@ -89,6 +86,45 @@ public class ScoringService {
                 .orElse(DEFAULT_THRESHOLD);
 
         return result.getOverallScore().compareTo(threshold) >= 0;
+    }
+
+    /**
+     * 判断各维度分数是否通过各自的阈值。
+     * 每个维度有独立的阈值配置，默认 5.0。
+     *
+     * @param scores 各维度分数映射
+     * @return true 如果所有维度都通过各自的阈值
+     */
+    public boolean passesDimensionThresholds(Map<String, Integer> scores) {
+        if (scores == null || scores.isEmpty()) {
+            return false;
+        }
+        for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+            BigDecimal dimThreshold = getDimensionThreshold(entry.getKey());
+            if (BigDecimal.valueOf(entry.getValue()).compareTo(dimThreshold) < 0) {
+                log.info("Dimension {} score {} below threshold {}", entry.getKey(), entry.getValue(), dimThreshold);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 获取指定维度的阈值。
+     * 从 system_config 中读取 scoring.threshold.{dimension}，默认 5.0。
+     */
+    public BigDecimal getDimensionThreshold(String dimension) {
+        String key = "scoring.threshold." + dimension;
+        return configRepo.findByKey(key)
+                .map(config -> {
+                    try {
+                        return new BigDecimal(config.getValue());
+                    } catch (NumberFormatException e) {
+                        log.warn("Invalid dimension threshold for {}: {}", dimension, config.getValue());
+                        return DEFAULT_THRESHOLD;
+                    }
+                })
+                .orElse(DEFAULT_THRESHOLD);
     }
 
     /**

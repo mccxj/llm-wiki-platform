@@ -16,4 +16,7 @@ public interface PageRepository extends JpaRepository<Page, UUID> {
     List<Page> findByStatus(String status);
     List<Page> findByPageType(PageType type);
     List<Page> findByStatusOrderByCreatedAtDesc(PageStatus status, Pageable pageable);
+    List<Page> findByStatus(String status, Pageable pageable);
+    List<Page> findByPageType(PageType type, Pageable pageable);
+    List<Page> findByStatusAndPageType(String status, PageType type, Pageable pageable);
 }

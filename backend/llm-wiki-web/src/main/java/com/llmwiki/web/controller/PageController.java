@@ -6,6 +6,7 @@ import com.llmwiki.domain.page.repository.PageLinkRepository;
 import com.llmwiki.domain.page.repository.PageRepository;
 import com.llmwiki.domain.processing.entity.ProcessingLog;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
+import com.llmwiki.common.enums.PageType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -36,12 +37,18 @@ public class PageController {
             @RequestParam(defaultValue = "ALL") String type,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        List<Page> pages;
         if (!"ALL".equals(status) && !"ALL".equals(type)) {
-            return ResponseEntity.ok(pageRepo.findAll(
-                    PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))).getContent());
+            pages = pageRepo.findByStatusAndPageType(status, PageType.valueOf(type), pageable);
+        } else if (!"ALL".equals(status)) {
+            pages = pageRepo.findByStatus(status, pageable);
+        } else if (!"ALL".equals(type)) {
+            pages = pageRepo.findByPageType(PageType.valueOf(type), pageable);
+        } else {
+            pages = pageRepo.findAll(pageable).getContent();
         }
-        return ResponseEntity.ok(pageRepo.findAll(
-                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"))).getContent());
+        return ResponseEntity.ok(pages);
     }
 
     /**

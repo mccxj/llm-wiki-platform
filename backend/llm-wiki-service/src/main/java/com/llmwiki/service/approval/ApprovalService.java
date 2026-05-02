@@ -3,7 +3,9 @@ package com.llmwiki.service.approval;
 import com.llmwiki.common.enums.ApprovalAction;
 import com.llmwiki.common.enums.ApprovalStatus;
 import com.llmwiki.common.enums.PageStatus;
+import com.llmwiki.domain.approval.entity.ApprovalAudit;
 import com.llmwiki.domain.approval.entity.ApprovalQueue;
+import com.llmwiki.domain.approval.repository.ApprovalAuditRepository;
 import com.llmwiki.domain.approval.repository.ApprovalQueueRepository;
 import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageRepository;
@@ -22,6 +24,7 @@ import java.util.UUID;
 public class ApprovalService {
 
     private final ApprovalQueueRepository approvalRepo;
+    private final ApprovalAuditRepository auditRepo;
     private final PageRepository pageRepo;
 
     @Transactional
@@ -57,8 +60,16 @@ public class ApprovalService {
         page.setApprovedAt(Instant.now());
         pageRepo.save(page);
 
+        approvalRepo.save(approval);
+        auditRepo.save(ApprovalAudit.builder()
+                .approvalId(approvalId)
+                .action("APPROVE")
+                .reviewerId(reviewerId)
+                .comment(comment)
+                .build());
+
         log.info("Page {} approved by {}", page.getId(), reviewerId);
-        return approvalRepo.save(approval);
+        return approval;
     }
 
     @Transactional
@@ -75,8 +86,16 @@ public class ApprovalService {
         page.setStatus(PageStatus.REJECTED);
         pageRepo.save(page);
 
+        approvalRepo.save(approval);
+        auditRepo.save(ApprovalAudit.builder()
+                .approvalId(approvalId)
+                .action("REJECT")
+                .reviewerId(reviewerId)
+                .comment(comment)
+                .build());
+
         log.info("Page {} rejected by {}", page.getId(), reviewerId);
-        return approvalRepo.save(approval);
+        return approval;
     }
 
     public List<ApprovalQueue> listPending() {
@@ -92,5 +111,12 @@ public class ApprovalService {
      */
     public List<ApprovalQueue> getApprovalHistory(UUID pageId) {
         return approvalRepo.findByPageId(pageId);
+    }
+
+    /**
+     * 获取审批审计追踪
+     */
+    public List<ApprovalAudit> getAuditTrail(UUID approvalId) {
+        return auditRepo.findByApprovalId(approvalId);
     }
 }
