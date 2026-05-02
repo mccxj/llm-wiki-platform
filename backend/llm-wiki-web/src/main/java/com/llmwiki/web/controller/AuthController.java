@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.annotation.PostConstruct;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,10 +24,12 @@ public class AuthController {
     private final PasswordEncoder passwordEncoder;
 
     // 内存用户存储（仅用于开发/演示）
-    private static final Map<String, String> USERS = new ConcurrentHashMap<>();
-    static {
-        USERS.put("admin", "ADMIN");
-        USERS.put("user", "USER");
+    private Map<String, String> USERS = new ConcurrentHashMap<>();
+
+    @PostConstruct
+    public void init() {
+        USERS.put("admin", passwordEncoder.encode("admin_password"));
+        USERS.put("user", passwordEncoder.encode("user_password"));
     }
 
     /**
@@ -34,12 +37,16 @@ public class AuthController {
      */
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        // 简化版：任何密码都能登录（实际应验证密码）
-        String role = USERS.get(request.getUsername());
-        if (role == null) {
+        String storedHash = USERS.get(request.getUsername());
+        if (storedHash == null) {
             return ResponseEntity.status(401).body(Map.of("error", "用户不存在"));
         }
 
+        if (!passwordEncoder.matches(request.getPassword(), storedHash)) {
+            return ResponseEntity.status(401).body(Map.of("error", "密码错误"));
+        }
+
+        String role = request.getUsername().equals("admin") ? "ADMIN" : "USER";
         String token = tokenProvider.createToken(request.getUsername(), role);
         return ResponseEntity.ok(Map.of(
                 "token", token,
@@ -56,7 +63,8 @@ public class AuthController {
         if (USERS.containsKey(request.getUsername())) {
             return ResponseEntity.badRequest().body(Map.of("error", "用户名已存在"));
         }
-        USERS.put(request.getUsername(), "USER");
+        String encodedPassword = passwordEncoder.encode(request.getPassword());
+        USERS.put(request.getUsername(), encodedPassword);
         String token = tokenProvider.createToken(request.getUsername(), "USER");
         return ResponseEntity.ok(Map.of(
                 "token", token,
