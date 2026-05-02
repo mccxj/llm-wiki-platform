@@ -112,25 +112,53 @@ class KnowledgeGraphServiceTest {
                 .id(UUID.randomUUID()).name("Orphan").nodeType(NodeType.ENTITY)
                 .description("No connections").build();
 
-        when(nodeRepo.findAll()).thenReturn(List.of(entityNode, orphan));
-        when(edgeRepo.findAll()).thenReturn(List.of());
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of(entityNode, orphan));
 
         List<KgNode> result = graphService.findOrphans();
 
         assertEquals(2, result.size()); // Both are orphans when no edges exist
+        verify(nodeRepo).findOrphanNodes();
+        verifyNoMoreInteractions(nodeRepo);
+        verifyNoInteractions(edgeRepo);
     }
 
     @Test
     void findOrphans_shouldExcludeConnectedNodes() {
-        when(nodeRepo.findAll()).thenReturn(List.of(entityNode, conceptNode));
-        KgEdge edge = KgEdge.builder()
-                .sourceNodeId(entityNode.getId()).targetNodeId(conceptNode.getId())
-                .edgeType(EdgeType.RELATED_TO).build();
-        when(edgeRepo.findAll()).thenReturn(List.of(edge));
+        KgNode orphan = KgNode.builder()
+                .id(UUID.randomUUID()).name("Orphan").nodeType(NodeType.ENTITY)
+                .description("No connections").build();
+
+        // Only the orphan is returned by the SQL query — connected nodes are excluded
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of(orphan));
 
         List<KgNode> result = graphService.findOrphans();
 
-        assertEquals(0, result.size()); // Both connected, no orphans
+        assertEquals(1, result.size());
+        assertEquals("Orphan", result.get(0).getName());
+        verify(nodeRepo).findOrphanNodes();
+    }
+
+    @Test
+    void findOrphans_shouldReturnEmptyWhenNoOrphans() {
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of());
+
+        List<KgNode> result = graphService.findOrphans();
+
+        assertTrue(result.isEmpty());
+        verify(nodeRepo).findOrphanNodes();
+    }
+
+    @Test
+    void findOrphansShouldNotCallFindAllOnNodeOrEdgeRepos() {
+        // Given
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of());
+
+        // When
+        graphService.findOrphans();
+
+        // Then: verify the old O(n) load-everything methods are NOT called
+        verify(nodeRepo, never()).findAll();
+        verify(edgeRepo, never()).findAll();
     }
 
     @Test

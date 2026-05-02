@@ -108,14 +108,7 @@ public class KnowledgeGraphService {
      * Find orphan nodes (no edges).
      */
     public List<KgNode> findOrphans() {
-        List<KgNode> allNodes = nodeRepo.findAll();
-        List<KgEdge> allEdges = edgeRepo.findAll();
-        Set<UUID> connectedIds = new HashSet<>();
-        allEdges.forEach(e -> { connectedIds.add(e.getSourceNodeId()); connectedIds.add(e.getTargetNodeId()); });
-
-        return allNodes.stream()
-                .filter(n -> !connectedIds.contains(n.getId()))
-                .toList();
+        return nodeRepo.findOrphanNodes();
     }
 
     /**

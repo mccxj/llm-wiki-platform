@@ -36,19 +36,8 @@ public class MaintenanceService {
      * 查找孤儿页面（没有入链的页面）
      */
     public List<Page> findOrphans() {
-        List<Page> allPages = pageRepo.findAll();
-        Set<UUID> linkedPageIds = new HashSet<>();
-        kgEdgeRepo.findAll().forEach(e -> {
-            kgNodeRepo.findById(e.getSourceNodeId()).ifPresent(n -> {
-                if (n.getPageId() != null) linkedPageIds.add(n.getPageId());
-            });
-            kgNodeRepo.findById(e.getTargetNodeId()).ifPresent(n -> {
-                if (n.getPageId() != null) linkedPageIds.add(n.getPageId());
-            });
-        });
-        return allPages.stream()
-                .filter(p -> !linkedPageIds.contains(p.getId()))
-                .collect(Collectors.toList());
+        List<UUID> connectedPageIds = kgEdgeRepo.findConnectedPageIds();
+        return pageRepo.findOrphanPages(connectedPageIds);
     }
 
     /**

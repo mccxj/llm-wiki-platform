@@ -5,7 +5,6 @@ import com.llmwiki.domain.graph.repository.KgNodeRepository;
 import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageRepository;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -32,162 +31,90 @@ class MaintenanceServiceTest {
 
     @Test
     void findSplitSuggestionsShouldReturnPagesWithLongContent() {
-        // Given - content longer than 10000 chars (200 * 50)
         String longContent = "a".repeat(10001);
         String shortContent = "short content";
 
         Page longPage = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Long Page")
-                .slug("long-page")
-                .content(longContent)
-                .build();
-
+                .id(UUID.randomUUID()).title("Long Page")
+                .slug("long-page").content(longContent).build();
         Page shortPage = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Short Page")
-                .slug("short-page")
-                .content(shortContent)
-                .build();
-
+                .id(UUID.randomUUID()).title("Short Page")
+                .slug("short-page").content(shortContent).build();
         Page nullContentPage = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Null Content Page")
-                .slug("null-page")
-                .content(null)
-                .build();
+                .id(UUID.randomUUID()).title("Null Content Page")
+                .slug("null-page").content(null).build();
 
         when(pageRepo.findAll()).thenReturn(List.of(longPage, shortPage, nullContentPage));
 
-        // When
         List<Page> result = maintenanceService.findSplitSuggestions();
 
-        // Then
         assertEquals(1, result.size());
         assertEquals("Long Page", result.get(0).getTitle());
-        assertEquals(longContent, result.get(0).getContent());
     }
 
     @Test
     void findSplitSuggestionsShouldReturnEmptyWhenNoLongPages() {
-        // Given - all pages have short content
         Page shortPage = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Short Page")
-                .slug("short-page")
-                .content("short")
-                .build();
-
+                .id(UUID.randomUUID()).title("Short Page")
+                .slug("short-page").content("short").build();
         when(pageRepo.findAll()).thenReturn(List.of(shortPage));
 
-        // When
-        List<Page> result = maintenanceService.findSplitSuggestions();
-
-        // Then
-        assertTrue(result.isEmpty());
+        assertTrue(maintenanceService.findSplitSuggestions().isEmpty());
     }
 
     @Test
     void findSplitSuggestionsShouldReturnEmptyForEmptyPageList() {
-        // Given
         when(pageRepo.findAll()).thenReturn(new ArrayList<>());
-
-        // When
-        List<Page> result = maintenanceService.findSplitSuggestions();
-
-        // Then
-        assertTrue(result.isEmpty());
+        assertTrue(maintenanceService.findSplitSuggestions().isEmpty());
     }
 
     @Test
     void findSplitSuggestionsBoundaryTest() {
-        // Given - content exactly at threshold (10000 chars = NOT over threshold)
-        String exactThreshold = "a".repeat(10000);
         Page boundaryPage = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Boundary Page")
-                .slug("boundary-page")
-                .content(exactThreshold)
-                .build();
-
+                .id(UUID.randomUUID()).title("Boundary Page")
+                .slug("boundary-page").content("a".repeat(10000)).build();
         when(pageRepo.findAll()).thenReturn(List.of(boundaryPage));
 
-        // When
-        List<Page> result = maintenanceService.findSplitSuggestions();
-
-        // Then - exactly 10000 chars should NOT be suggested for split (must be > 10000)
-        assertTrue(result.isEmpty());
+        assertTrue(maintenanceService.findSplitSuggestions().isEmpty());
     }
 
     @Test
     void findDuplicatesShouldDetectExactDuplicates() {
-        // Given - two pages with the same title
         Page page1 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Java Guide")
-                .slug("java-guide")
-                .content("Content 1")
-                .build();
-
+                .id(UUID.randomUUID()).title("Java Guide")
+                .slug("java-guide").content("Content 1").build();
         Page page2 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Java Guide")
-                .slug("java-guide-2")
-                .content("Content 2")
-                .build();
-
+                .id(UUID.randomUUID()).title("Java Guide")
+                .slug("java-guide-2").content("Content 2").build();
         Page page3 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Python Tutorial")
-                .slug("python-tutorial")
-                .content("Different content")
-                .build();
+                .id(UUID.randomUUID()).title("Python Tutorial")
+                .slug("python-tutorial").content("Different content").build();
 
         when(pageRepo.findAll()).thenReturn(List.of(page1, page2, page3));
 
-        // When
         List<DuplicateGroup> result = maintenanceService.findDuplicates();
 
-        // Then - should find one group with the two "Java Guide" pages
         assertEquals(1, result.size());
         assertEquals(2, result.get(0).getPages().size());
         assertEquals(1.0, result.get(0).getSimilarity(), 0.001);
-        List<String> titles = result.get(0).getPages().stream()
-                .map(Page::getTitle)
-                .toList();
-        assertTrue(titles.contains("Java Guide"));
     }
 
     @Test
     void findDuplicatesShouldDetectNearDuplicates() {
-        // Given - titles that are similar but not identical
         Page page1 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Java Programming Guide")
-                .slug("java-guide")
-                .content("Content 1")
-                .build();
-
+                .id(UUID.randomUUID()).title("Java Programming Guide")
+                .slug("java-guide").content("Content 1").build();
         Page page2 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Java Programming Guides")
-                .slug("java-guides")
-                .content("Content 2")
-                .build();
-
+                .id(UUID.randomUUID()).title("Java Programming Guides")
+                .slug("java-guides").content("Content 2").build();
         Page page3 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Python Tutorial")
-                .slug("python-tutorial")
-                .content("Different content")
-                .build();
+                .id(UUID.randomUUID()).title("Python Tutorial")
+                .slug("python-tutorial").content("Different content").build();
 
         when(pageRepo.findAll()).thenReturn(List.of(page1, page2, page3));
 
-        // When
         List<DuplicateGroup> result = maintenanceService.findDuplicates();
 
-        // Then - should detect near-duplicate group (Jaro-Winkler > 0.85)
         assertEquals(1, result.size());
         assertEquals(2, result.get(0).getPages().size());
         assertTrue(result.get(0).getSimilarity() > 0.85);
@@ -195,93 +122,125 @@ class MaintenanceServiceTest {
 
     @Test
     void findDuplicatesShouldNotGroupDissimilarTitles() {
-        // Given - pages with very different titles
         Page page1 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Java Programming Guide")
-                .slug("java-guide")
-                .content("Content 1")
-                .build();
-
+                .id(UUID.randomUUID()).title("Java Programming Guide")
+                .slug("java-guide").content("Content 1").build();
         Page page2 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Python Data Science Handbook")
-                .slug("python-handbook")
-                .content("Content 2")
-                .build();
-
+                .id(UUID.randomUUID()).title("Python Data Science Handbook")
+                .slug("python-handbook").content("Content 2").build();
         Page page3 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("React Component Patterns")
-                .slug("react-patterns")
-                .content("Content 3")
-                .build();
+                .id(UUID.randomUUID()).title("React Component Patterns")
+                .slug("react-patterns").content("Content 3").build();
 
         when(pageRepo.findAll()).thenReturn(List.of(page1, page2, page3));
 
-        // When
-        List<DuplicateGroup> result = maintenanceService.findDuplicates();
-
-        // Then - no groups should be found
-        assertTrue(result.isEmpty());
+        assertTrue(maintenanceService.findDuplicates().isEmpty());
     }
 
     @Test
     void findDuplicatesShouldReturnEmptyForEmptyPageList() {
-        // Given
         when(pageRepo.findAll()).thenReturn(new ArrayList<>());
-
-        // When
-        List<DuplicateGroup> result = maintenanceService.findDuplicates();
-
-        // Then
-        assertTrue(result.isEmpty());
+        assertTrue(maintenanceService.findDuplicates().isEmpty());
     }
 
     @Test
     void findDuplicatesShouldReturnEmptyForSinglePage() {
-        // Given - only one page, no duplicates possible
         Page page = Page.builder()
-                .id(UUID.randomUUID())
-                .title("Solo Page")
-                .slug("solo")
-                .content("Content")
-                .build();
-
+                .id(UUID.randomUUID()).title("Solo Page")
+                .slug("solo").content("Content").build();
         when(pageRepo.findAll()).thenReturn(List.of(page));
-
-        // When
-        List<DuplicateGroup> result = maintenanceService.findDuplicates();
-
-        // Then
-        assertTrue(result.isEmpty());
+        assertTrue(maintenanceService.findDuplicates().isEmpty());
     }
 
     @Test
     void findDuplicatesShouldBeCaseInsensitive() {
-        // Given - same title different cases
         Page page1 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("JAVA GUIDE")
-                .slug("java-guide-1")
-                .content("Content 1")
-                .build();
-
+                .id(UUID.randomUUID()).title("JAVA GUIDE")
+                .slug("java-guide-1").content("Content 1").build();
         Page page2 = Page.builder()
-                .id(UUID.randomUUID())
-                .title("java guide")
-                .slug("java-guide-2")
-                .content("Content 2")
-                .build();
-
+                .id(UUID.randomUUID()).title("java guide")
+                .slug("java-guide-2").content("Content 2").build();
         when(pageRepo.findAll()).thenReturn(List.of(page1, page2));
 
-        // When
         List<DuplicateGroup> result = maintenanceService.findDuplicates();
 
-        // Then - should detect as duplicates (case-insensitive)
         assertEquals(1, result.size());
         assertEquals(2, result.get(0).getPages().size());
         assertEquals(1.0, result.get(0).getSimilarity(), 0.001);
+    }
+
+    // ===== Orphan detection tests (PR #29) =====
+
+    @Test
+    void findOrphansShouldReturnOrphanPages() {
+        UUID connectedId = UUID.randomUUID();
+        UUID orphanId = UUID.randomUUID();
+
+        Page connectedPage = Page.builder()
+                .id(connectedId).title("Connected Page")
+                .slug("connected-page").content("Has edges").build();
+        Page orphanPage = Page.builder()
+                .id(orphanId).title("Orphan Page")
+                .slug("orphan-page").content("No edges").build();
+
+        when(kgEdgeRepo.findConnectedPageIds()).thenReturn(List.of(connectedId));
+        when(pageRepo.findOrphanPages(List.of(connectedId))).thenReturn(List.of(orphanPage));
+
+        List<Page> result = maintenanceService.findOrphans();
+
+        assertEquals(1, result.size());
+        assertEquals("Orphan Page", result.get(0).getTitle());
+        assertEquals(orphanId, result.get(0).getId());
+
+        verify(kgEdgeRepo).findConnectedPageIds();
+        verify(pageRepo).findOrphanPages(List.of(connectedId));
+        verifyNoMoreInteractions(kgEdgeRepo, pageRepo);
+        verifyNoInteractions(kgNodeRepo);
+    }
+
+    @Test
+    void findOrphansShouldReturnAllPagesWhenNoConnectionsExist() {
+        Page page1 = Page.builder()
+                .id(UUID.randomUUID()).title("Page One")
+                .slug("page-one").content("Content").build();
+        Page page2 = Page.builder()
+                .id(UUID.randomUUID()).title("Page Two")
+                .slug("page-two").content("Content").build();
+
+        when(kgEdgeRepo.findConnectedPageIds()).thenReturn(List.of());
+        when(pageRepo.findOrphanPages(List.of())).thenReturn(List.of(page1, page2));
+
+        List<Page> result = maintenanceService.findOrphans();
+
+        assertEquals(2, result.size());
+        verify(kgEdgeRepo).findConnectedPageIds();
+        verify(pageRepo).findOrphanPages(List.of());
+    }
+
+    @Test
+    void findOrphansShouldReturnEmptyWhenAllPagesAreConnected() {
+        UUID id1 = UUID.randomUUID();
+        UUID id2 = UUID.randomUUID();
+
+        when(kgEdgeRepo.findConnectedPageIds()).thenReturn(List.of(id1, id2));
+        when(pageRepo.findOrphanPages(List.of(id1, id2))).thenReturn(List.of());
+
+        List<Page> result = maintenanceService.findOrphans();
+
+        assertTrue(result.isEmpty());
+        verify(kgEdgeRepo).findConnectedPageIds();
+        verify(pageRepo).findOrphanPages(List.of(id1, id2));
+    }
+
+    @Test
+    void findOrphansShouldNotCallFindAllOnEdgeOrPageRepos() {
+        when(kgEdgeRepo.findConnectedPageIds()).thenReturn(List.of());
+        when(pageRepo.findOrphanPages(List.of())).thenReturn(List.of());
+
+        maintenanceService.findOrphans();
+
+        verify(kgEdgeRepo, never()).findAll();
+        verify(pageRepo, never()).findAll();
+        verify(kgNodeRepo, never()).findAll();
     }
 }
