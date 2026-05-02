@@ -192,8 +192,9 @@ class PipelineServiceTest {
                 .id(UUID.randomUUID()).name("OOP").nodeType(NodeType.CONCEPT).build();
 
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
@@ -226,8 +227,9 @@ class PipelineServiceTest {
                 .weight(BigDecimal.valueOf(0.5)).build();
 
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
@@ -250,8 +252,9 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldAutoSubmitForApproval() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
@@ -290,8 +293,9 @@ class PipelineServiceTest {
     @Test
     void generateUniqueSlug_shouldAppendSuffixForDuplicates() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
@@ -323,17 +327,16 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldRetryOnFailureAndSaveToDlq() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         // Score always fails
-        when(aiClient.score(doc.getContent())).thenThrow(new RuntimeException("AI service unavailable"));
+        when(scoringService.scoreDocument(doc.getContent())).thenThrow(new RuntimeException("AI service unavailable"));
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.processDocument(rawDocId);
 
         // Should have retried 3 times
-        verify(aiClient, times(3)).score(doc.getContent());
+        verify(scoringService, times(3)).scoreDocument(doc.getContent());
         // Should have saved to DLQ
         ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
         verify(deadLetterQueueRepo).save(dlqCaptor.capture());
@@ -348,18 +351,18 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldSucceedOnRetry() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         // First call fails, second succeeds
-        when(aiClient.score(doc.getContent()))
+        when(scoringService.scoreDocument(doc.getContent()))
                 .thenThrow(new RuntimeException("Transient error"))
                 .thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.processDocument(rawDocId);
 
-        // Should have called score twice (1 fail + 1 success)
-        verify(aiClient, times(2)).score(doc.getContent());
+        // Should have called scoreDocument twice (1 fail + 1 success)
+        verify(scoringService, times(2)).scoreDocument(doc.getContent());
         // Should NOT have saved to DLQ
         verify(deadLetterQueueRepo, never()).save(any());
     }
@@ -367,9 +370,9 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldSaveDlqForEntityExtractionFailure() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenThrow(new RuntimeException("Extraction failed"));
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
@@ -400,8 +403,9 @@ class PipelineServiceTest {
 
         // Mock successful pipeline execution
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.retryDeadLetter(dlqId);
