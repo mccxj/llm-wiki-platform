@@ -28,6 +28,7 @@ import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
 import com.llmwiki.domain.config.repository.SystemConfigRepository;
+import com.llmwiki.service.scoring.ScoringService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,7 @@ public class PipelineService {
 
     private final AiApiClient aiClient;
     private final EmbeddingClient embeddingClient;
+    private final ScoringService scoringService;
 
     @Transactional
     public void processDocument(UUID rawDocId) {
@@ -66,14 +68,13 @@ public class PipelineService {
 
         log.info("Starting pipeline for document: {} ({})", doc.getTitle(), doc.getId());
 
-        BigDecimal threshold = getScoreThreshold();
-
         // Step 1: Score
         ScoreResult scoreResult = executeWithRetry(rawDocId, "SCORE", () -> scoreDocument(doc));
         if (scoreResult == null) {
             return; // already in DLQ
         }
-        if (scoreResult.getOverallScore().compareTo(threshold) < 0) {
+        if (!scoringService.passesThreshold(scoreResult)) {
+            BigDecimal threshold = scoringService.getThreshold();
             log.info("Document {} score {} below threshold {}, skipping", doc.getId(), scoreResult.getOverallScore(), threshold);
             saveStepLog(rawDocId, "SCORE", StepStatus.SKIPPED, "Score " + scoreResult.getOverallScore() + " below threshold " + threshold);
             return;
@@ -228,13 +229,7 @@ public class PipelineService {
     }
 
     private ScoreResult scoreDocument(RawDocument doc) {
-        return aiClient.score(doc.getContent());
-    }
-
-    private BigDecimal getScoreThreshold() {
-        return configRepo.findByKey("scoring.threshold")
-                .map(c -> new BigDecimal(c.getValue()))
-                .orElse(new BigDecimal("60.0"));
+        return scoringService.scoreDocument(doc.getContent());
     }
 
     private ExtractionResult extractEntities(RawDocument doc) {
@@ -327,7 +322,7 @@ public class PipelineService {
 
         StringBuilder content = new StringBuilder();
         content.append("# ").append(doc.getTitle()).append("\n\n");
-        content.append("> Score: ").append(score.getOverallScore()).append("/100\n");
+        content.append("> Score: ").append(score.getOverallScore()).append("/10\n");
         content.append("> Source: ").append(doc.getSourceUrl() != null ? doc.getSourceUrl() : "N/A").append("\n\n");
 
         if (!entities.getEntities().isEmpty()) {
