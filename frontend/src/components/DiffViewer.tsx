@@ -28,6 +28,22 @@ export default function DiffViewer({ before, after, mode = 'unified' }: DiffView
     const afterLines = (after || '').split('\n');
     const result: DiffLine[] = [];
 
+    // Guard: if total lines > 500, use simple line-by-line comparison instead of O(n*m) LCS
+    if (beforeLines.length + afterLines.length > 500) {
+      const maxLen = Math.max(beforeLines.length, afterLines.length);
+      for (let i = 0; i < maxLen; i++) {
+        const bLine = i < beforeLines.length ? beforeLines[i] : null;
+        const aLine = i < afterLines.length ? afterLines[i] : null;
+        if (bLine === aLine) {
+          if (bLine !== null) result.push({ type: 'unchanged', content: bLine, oldLineNum: i + 1, newLineNum: i + 1 });
+        } else {
+          if (bLine !== null) result.push({ type: 'removed', content: bLine, oldLineNum: i + 1 });
+          if (aLine !== null) result.push({ type: 'added', content: aLine, newLineNum: i + 1 });
+        }
+      }
+      return result;
+    }
+
     // Simple LCS-based diff
     const m = beforeLines.length;
     const n = afterLines.length;
@@ -119,10 +135,13 @@ export default function DiffViewer({ before, after, mode = 'unified' }: DiffView
     );
   }
 
-  // Split mode
-  const removedLines = lines.filter(l => l.type === 'removed');
-  const addedLines = lines.filter(l => l.type === 'added');
-  const maxLen = Math.max(removedLines.length, addedLines.length);
+  // Split mode: show full before/after content side by side with highlighting
+  const beforeLines = (before || '').split('\n');
+  const afterLines = (after || '').split('\n');
+  // Build a set of removed/added line content for quick lookup
+  const removedSet = new Set(lines.filter(l => l.type === 'removed').map(l => l.content));
+  const addedSet = new Set(lines.filter(l => l.type === 'added').map(l => l.content));
+  const maxLen = Math.max(beforeLines.length, afterLines.length);
 
   return (
     <div style={{ display: 'flex', gap: 16, fontFamily: 'monospace', fontSize: 13 }}>
@@ -131,14 +150,11 @@ export default function DiffViewer({ before, after, mode = 'unified' }: DiffView
           <Tag color="red">变更前</Tag>
         </div>
         <div style={{ maxHeight: 500, overflow: 'auto' }}>
-          {Array.from({ length: maxLen }).map((_, idx) => {
-            const line = removedLines[idx];
-            return (
-              <div key={idx} style={{ padding: '2px 8px', background: line ? '#fff1f0' : '#fff', borderBottom: '1px solid #f0f0f0', minHeight: 24 }}>
-                {line?.content || '\u00A0'}
-              </div>
-            );
-          })}
+          {beforeLines.map((content, idx) => (
+            <div key={idx} style={{ padding: '2px 8px', background: removedSet.has(content) ? '#fff1f0' : '#fff', borderBottom: '1px solid #f0f0f0', minHeight: 24 }}>
+              {content || '\u00A0'}
+            </div>
+          ))}
         </div>
       </div>
       <div style={{ flex: 1, border: '1px solid #b7eb8f', borderRadius: 6, overflow: 'hidden' }}>
@@ -146,14 +162,11 @@ export default function DiffViewer({ before, after, mode = 'unified' }: DiffView
           <Tag color="green">变更后</Tag>
         </div>
         <div style={{ maxHeight: 500, overflow: 'auto' }}>
-          {Array.from({ length: maxLen }).map((_, idx) => {
-            const line = addedLines[idx];
-            return (
-              <div key={idx} style={{ padding: '2px 8px', background: line ? '#f6ffed' : '#fff', borderBottom: '1px solid #f0f0f0', minHeight: 24 }}>
-                {line?.content || '\u00A0'}
-              </div>
-            );
-          })}
+          {afterLines.map((content, idx) => (
+            <div key={idx} style={{ padding: '2px 8px', background: addedSet.has(content) ? '#f6ffed' : '#fff', borderBottom: '1px solid #f0f0f0', minHeight: 24 }}>
+              {content || '\u00A0'}
+            </div>
+          ))}
         </div>
       </div>
     </div>

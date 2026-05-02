@@ -188,12 +188,41 @@ export default function Graph() {
       {/* Node detail drawer */}
       <Drawer title="节点详情" open={!!selectedNode} onClose={() => setSelectedNode(null)} width={400}>
         {selectedNode && (
-          <Descriptions column={1} size="small">
-            <Descriptions.Item label="名称">{selectedNode.name}</Descriptions.Item>
-            <Descriptions.Item label="类型"><Tag color={NODE_COLORS[selectedNode.type]}>{selectedNode.type}</Tag></Descriptions.Item>
-            <Descriptions.Item label="ID">{selectedNode.id}</Descriptions.Item>
-            <Descriptions.Item label="描述">{selectedNode.description || '无'}</Descriptions.Item>
-          </Descriptions>
+          <>
+            <Descriptions column={1} size="small">
+              <Descriptions.Item label="名称">{selectedNode.name}</Descriptions.Item>
+              <Descriptions.Item label="类型"><Tag color={NODE_COLORS[selectedNode.type]}>{selectedNode.type}</Tag></Descriptions.Item>
+              <Descriptions.Item label="ID">{selectedNode.id}</Descriptions.Item>
+              <Descriptions.Item label="描述">{selectedNode.description || '无'}</Descriptions.Item>
+            </Descriptions>
+            <Button
+              type="primary"
+              style={{ marginTop: 16 }}
+              onClick={async () => {
+                if (!selectedNode) return;
+                try {
+                  const res = await fetch(`/api/graph/neighborhood/${selectedNode.id}`);
+                  const data = await res.json();
+                  const newNodes = data.nodes.filter((n: any) => !graphData.nodes.some((gn: any) => gn.id === n.id));
+                  const newLinks = data.edges.filter((e: any) => !graphData.links.some((gl: any) => gl.source === e.source && gl.target === e.target));
+                  setGraphData(prev => ({
+                    nodes: [...prev.nodes, ...newNodes],
+                    links: [...prev.links, ...newLinks],
+                  }));
+                  if (newNodes.length > 0) {
+                    message.success(`展开成功，新增 ${newNodes.length} 个节点`);
+                  } else {
+                    message.info('没有更多相邻节点');
+                  }
+                } catch (e) {
+                  message.error('展开失败');
+                }
+                setSelectedNode(null);
+              }}
+            >
+              展开相邻节点
+            </Button>
+          </>
         )}
       </Drawer>
 

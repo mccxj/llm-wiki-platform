@@ -24,7 +24,7 @@ public class SyncScheduler {
     @Scheduled(cron = "${sync.default-cron:0 */6 * * * *}")
     public void scheduledSync() {
         log.info("Starting scheduled sync");
-        sourceRepo.findAll().forEach(source -> {
+        sourceRepo.findByEnabledTrue().forEach(source -> {
             try {
                 syncService.syncSource(source.getId());
             } catch (Exception e) {
