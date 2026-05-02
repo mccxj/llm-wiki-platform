@@ -11,6 +11,7 @@ import java.util.UUID;
 @Repository
 public interface KgNodeRepository extends JpaRepository<KgNode, UUID> {
     Optional<KgNode> findByNameAndNodeType(String name, NodeType nodeType);
+    Optional<KgNode> findByNameIgnoreCaseAndNodeType(String name, NodeType nodeType);
     List<KgNode> findByNameContaining(String keyword);
     long countByNodeType(NodeType nodeType);
 }

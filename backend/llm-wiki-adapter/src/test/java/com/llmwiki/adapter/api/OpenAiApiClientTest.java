@@ -15,7 +15,7 @@ class OpenAiApiClientTest {
 
     @BeforeEach
     void setUp() {
-        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model");
+        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "");
     }
 
     @Test
@@ -59,5 +59,17 @@ class OpenAiApiClientTest {
     @Test
     void chat_shouldThrowForUnreachableServer() {
         assertThrows(Exception.class, () -> client.chat("system", "user"));
+    }
+
+    @Test
+    void constructor_withCustomPrompts_shouldUseProvidedPrompts() {
+        String customScore = "Custom score prompt";
+        String customEntity = "Custom entity prompt";
+        String customConcept = "Custom concept prompt";
+        OpenAiApiClient customClient = new OpenAiApiClient(
+                "http://localhost:9999", "test-key", "test-model",
+                customScore, customEntity, customConcept);
+        assertNotNull(customClient);
+        assertTrue(customClient.isAvailable());
     }
 }

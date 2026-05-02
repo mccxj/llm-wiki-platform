@@ -83,7 +83,8 @@ class PipelineServiceTest {
 
         entities = new ExtractionResult();
         entities.setEntities(List.of(
-                new EntityInfo("Java", "TECH", "Programming language")));
+                new EntityInfo("Java", "TECH", "Programming language", List.of("Sun Microsystems")),
+                new EntityInfo("Sun Microsystems", "ORG", "Tech company", List.of("Java"))));
         entities.setConcepts(Collections.emptyList());
 
         concepts = new ExtractionResult();
@@ -121,6 +122,7 @@ class PipelineServiceTest {
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
             KgNode n = i.getArgument(0);
@@ -128,6 +130,7 @@ class PipelineServiceTest {
             return n;
         });
         when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
         when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
             Page p = i.getArgument(0);
@@ -142,7 +145,7 @@ class PipelineServiceTest {
         verify(scoringService).scoreDocument(doc.getContent());
         verify(aiClient).extractEntities(doc.getContent());
         verify(aiClient).extractConcepts(doc.getContent());
-        verify(kgNodeRepo, atLeast(2)).save(any(KgNode.class));
+        verify(kgNodeRepo, atLeast(3)).save(any(KgNode.class));
         verify(pageRepo).save(any(Page.class));
         verify(approvalQueueRepo).save(any());
     }
@@ -150,7 +153,8 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldUseExistingKgNodes() {
         KgNode existingNode = KgNode.builder()
-                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY)
+                .description("A programming language").build();
 
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
@@ -159,6 +163,7 @@ class PipelineServiceTest {
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
             KgNode n = i.getArgument(0);
@@ -179,9 +184,9 @@ class PipelineServiceTest {
 
         ArgumentCaptor<KgNode> nodeCaptor = ArgumentCaptor.forClass(KgNode.class);
         verify(kgNodeRepo, atLeastOnce()).save(nodeCaptor.capture());
-        long entitySaves = nodeCaptor.getAllValues().stream()
-                .filter(n -> n.getNodeType() == NodeType.ENTITY).count();
-        assertEquals(0, entitySaves);
+        long javaEntitySaves = nodeCaptor.getAllValues().stream()
+                .filter(n -> n.getNodeType() == NodeType.ENTITY && "Java".equals(n.getName())).count();
+        assertEquals(0, javaEntitySaves);
     }
 
     @Test
@@ -198,8 +203,15 @@ class PipelineServiceTest {
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
-        when(kgEdgeRepo.findBySourceNodeId(conceptNode.getId())).thenReturn(List.of());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
         when(kgEdgeRepo.save(any(KgEdge.class))).thenAnswer(i -> i.getArgument(0));
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
         when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
@@ -212,7 +224,7 @@ class PipelineServiceTest {
 
         pipelineService.processDocument(rawDocId);
 
-        verify(kgEdgeRepo).save(any(KgEdge.class));
+        verify(kgEdgeRepo, atLeast(2)).save(any(KgEdge.class));
     }
 
     @Test
@@ -233,7 +245,14 @@ class PipelineServiceTest {
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
         when(kgEdgeRepo.findBySourceNodeId(conceptNode.getId())).thenReturn(List.of(existingEdge));
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
         when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
@@ -257,7 +276,8 @@ class PipelineServiceTest {
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
-        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
             KgNode n = i.getArgument(0);
             n.setId(UUID.randomUUID());
@@ -298,7 +318,8 @@ class PipelineServiceTest {
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
-        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
             KgNode n = i.getArgument(0);
             n.setId(UUID.randomUUID());
@@ -436,5 +457,179 @@ class PipelineServiceTest {
 
         assertThrows(IllegalStateException.class,
                 () -> pipelineService.retryDeadLetter(dlqId));
+    }
+
+    // ===== P0-1: Entity sub-type persistence =====
+
+    @Test
+    void processDocument_shouldPersistEntitySubType() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        ArgumentCaptor<KgNode> captor = ArgumentCaptor.forClass(KgNode.class);
+        verify(kgNodeRepo, atLeast(2)).save(captor.capture());
+        List<KgNode> savedNodes = captor.getAllValues();
+        // Java entity should have sub-type TECH
+        savedNodes.stream()
+                .filter(n -> "Java".equals(n.getName()))
+                .forEach(n -> assertEquals("TECH", n.getEntitySubType()));
+        // Sun Microsystems entity should have sub-type ORG
+        savedNodes.stream()
+                .filter(n -> "Sun Microsystems".equals(n.getName()))
+                .forEach(n -> assertEquals("ORG", n.getEntitySubType()));
+    }
+
+    // ===== P0-2: Entity-entity edges =====
+
+    @Test
+    void processDocument_shouldCreateEntityEntityEdges() {
+        KgNode javaNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
+        KgNode sunNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Sun Microsystems").nodeType(NodeType.ENTITY).build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(javaNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.of(sunNode));
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(javaNode));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
+        when(kgEdgeRepo.save(any(KgEdge.class))).thenAnswer(i -> i.getArgument(0));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Should create: Java→Sun, Sun→Java (entity-entity) + OOP→Java (concept-entity) = at least 3
+        verify(kgEdgeRepo, atLeast(3)).save(any(KgEdge.class));
+    }
+
+    // ===== P1-4: Update existing node description =====
+
+    @Test
+    void processDocument_shouldUpdateExistingNodeDescriptionWhenRicher() {
+        KgNode existingNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY)
+                .description("Old brief desc").build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            if (n.getId() == null) n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // The existing Java node should have been saved with updated description
+        ArgumentCaptor<KgNode> captor = ArgumentCaptor.forClass(KgNode.class);
+        verify(kgNodeRepo, atLeast(2)).save(captor.capture());
+        captor.getAllValues().stream()
+                .filter(n -> "Java".equals(n.getName()) && n.getId().equals(existingNode.getId()))
+                .forEach(n -> assertEquals("Programming language", n.getDescription()));
+    }
+
+    // ===== P1-5: Case-insensitive matching for concept related entities =====
+
+    @Test
+    void processDocument_shouldMatchRelatedEntitiesCaseInsensitively() {
+        KgNode entityNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("JAVA").nodeType(NodeType.ENTITY).build();
+        KgNode conceptNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("OOP").nodeType(NodeType.CONCEPT).build();
+
+        // Concept references "Java" (mixed case) but entity is stored as "JAVA" (upper case)
+        ExtractionResult caseSensitiveConcepts = new ExtractionResult();
+        caseSensitiveConcepts.setEntities(Collections.emptyList());
+        caseSensitiveConcepts.setConcepts(List.of(
+                new ConceptInfo("OOP", "Object-Oriented", List.of("Java"))));
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(caseSensitiveConcepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        // Case-insensitive match: "Java" should find "JAVA"
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
+        when(kgEdgeRepo.save(any(KgEdge.class))).thenAnswer(i -> i.getArgument(0));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Edge should be created via case-insensitive match
+        verify(kgEdgeRepo, atLeast(1)).save(any(KgEdge.class));
     }
 }
