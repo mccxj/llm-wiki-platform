@@ -4,6 +4,7 @@ import com.llmwiki.domain.config.entity.SystemConfig;
 import com.llmwiki.domain.config.repository.SystemConfigRepository;
 import com.llmwiki.service.maintenance.MaintenanceReport;
 import com.llmwiki.service.maintenance.MaintenanceService;
+import com.llmwiki.service.maintenance.DuplicateGroup;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -67,7 +68,7 @@ public class AdminController {
      * 触发重复检测
      */
     @PostMapping("/maintenance/duplicates")
-    public ResponseEntity<List<?>> triggerDuplicateCheck() {
+    public ResponseEntity<List<DuplicateGroup>> triggerDuplicateCheck() {
         return ResponseEntity.ok(maintenanceService.findDuplicates());
     }
 

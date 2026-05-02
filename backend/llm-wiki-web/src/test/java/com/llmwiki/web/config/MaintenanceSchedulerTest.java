@@ -4,6 +4,7 @@ import com.llmwiki.domain.maintenance.entity.MaintenanceReportLog;
 import com.llmwiki.domain.maintenance.repository.MaintenanceReportLogRepository;
 import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.service.maintenance.MaintenanceService;
+import com.llmwiki.service.maintenance.DuplicateGroup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -80,7 +81,7 @@ class MaintenanceSchedulerTest {
         Page dup2 = Page.builder().id(UUID.randomUUID()).title("Dup").slug("dup-2").build();
         Page splitPage = Page.builder().id(UUID.randomUUID()).title("Long Page").slug("long").build();
 
-        when(maintenanceService.findDuplicates()).thenReturn(List.of(List.of(dup1, dup2)));
+        when(maintenanceService.findDuplicates()).thenReturn(List.of(new DuplicateGroup(List.of(dup1, dup2), 1.0)));
         when(maintenanceService.findSplitSuggestions()).thenReturn(List.of(splitPage));
 
         // When

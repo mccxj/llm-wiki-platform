@@ -9,6 +9,7 @@ import com.llmwiki.domain.page.repository.PageRepository;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.text.similarity.JaroWinklerSimilarity;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -23,6 +24,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class MaintenanceService {
+
+    private static final double DUPLICATE_THRESHOLD = 0.85;
 
     private final KgNodeRepository kgNodeRepo;
     private final KgEdgeRepository kgEdgeRepo;
@@ -59,18 +62,49 @@ public class MaintenanceService {
     }
 
     /**
-     * 查找可能重复的页面（标题相似）
+     * 查找可能重复的页面（使用Jaro-Winkler相似度）
+     * 相似度超过0.85的页面被归为同一组
      */
-    public List<List<Page>> findDuplicates() {
+    public List<DuplicateGroup> findDuplicates() {
         List<Page> allPages = pageRepo.findAll();
-        Map<String, List<Page>> byTitle = new HashMap<>();
-        for (Page p : allPages) {
-            String key = p.getTitle().toLowerCase().trim();
-            byTitle.computeIfAbsent(key, k -> new ArrayList<>()).add(p);
+        JaroWinklerSimilarity similarity = new JaroWinklerSimilarity();
+
+        // Track which pages have been grouped to avoid duplicates in output
+        Set<UUID> grouped = new HashSet<>();
+        List<DuplicateGroup> result = new ArrayList<>();
+
+        for (int i = 0; i < allPages.size(); i++) {
+            Page pageA = allPages.get(i);
+            if (grouped.contains(pageA.getId())) continue;
+
+            List<Page> group = new ArrayList<>();
+            group.add(pageA);
+            double maxSimilarity = 1.0;
+
+            for (int j = i + 1; j < allPages.size(); j++) {
+                Page pageB = allPages.get(j);
+                if (grouped.contains(pageB.getId())) continue;
+
+                String titleA = pageA.getTitle().toLowerCase().trim();
+                String titleB = pageB.getTitle().toLowerCase().trim();
+
+                Double sim = similarity.apply(titleA, titleB);
+                if (sim != null && sim > DUPLICATE_THRESHOLD) {
+                    group.add(pageB);
+                    grouped.add(pageB.getId());
+                    if (sim < maxSimilarity) {
+                        maxSimilarity = sim;
+                    }
+                }
+            }
+
+            if (group.size() > 1) {
+                grouped.add(pageA.getId());
+                result.add(new DuplicateGroup(group, maxSimilarity));
+            }
         }
-        return byTitle.values().stream()
-                .filter(list -> list.size() > 1)
-                .collect(Collectors.toList());
+
+        return result;
     }
 
     /**
@@ -127,11 +161,12 @@ public class MaintenanceService {
         report.setTotalPages(pageRepo.count());
         report.setOrphanCount(findOrphans().size());
         report.setStaleCount(findStalePages(30).size());
-        report.setDuplicateGroups(findDuplicates().size());
+        List<DuplicateGroup> dupGroups = findDuplicates();
+        report.setDuplicateGroups(dupGroups.size());
         report.setContradictionCount(findContradictions().size());
         report.setOrphans(findOrphans());
         report.setStalePages(findStalePages(30));
-        report.setDuplicates(findDuplicates());
+        report.setDuplicates(dupGroups);
         report.setContradictions(findContradictions());
         return report;
     }
