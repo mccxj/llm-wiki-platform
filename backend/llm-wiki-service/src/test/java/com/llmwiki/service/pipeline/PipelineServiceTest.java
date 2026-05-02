@@ -23,6 +23,7 @@ import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
+import com.llmwiki.service.scoring.ScoringService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -54,6 +55,7 @@ class PipelineServiceTest {
     @Mock SystemConfigRepository configRepo;
     @Mock AiApiClient aiClient;
     @Mock EmbeddingClient embeddingClient;
+    @Mock ScoringService scoringService;
 
     @InjectMocks
     PipelineService pipelineService;
@@ -73,9 +75,9 @@ class PipelineServiceTest {
                 .contentHash("abc123").build();
 
         scoreResult = new ScoreResult();
-        scoreResult.setOverallScore(new BigDecimal("75.0"));
+        scoreResult.setOverallScore(new BigDecimal("7.5"));
         scoreResult.setReason("Good quality");
-        scoreResult.setScores(Map.of("relevance", 80, "completeness", 70));
+        scoreResult.setScores(Map.of("information_density", 8, "entity_richness", 7));
         scoreResult.setKeyEntities(List.of("Java"));
         scoreResult.setSuggestedTags(List.of("programming", "language"));
 
@@ -93,17 +95,18 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldSkipWhenScoreBelowThreshold() {
         ScoreResult lowScore = new ScoreResult();
-        lowScore.setOverallScore(new BigDecimal("30.0"));
+        lowScore.setOverallScore(new BigDecimal("3.0"));
         lowScore.setReason("Low quality");
 
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(lowScore);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(lowScore);
+        when(scoringService.passesThreshold(lowScore)).thenReturn(false);
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.processDocument(rawDocId);
 
-        verify(aiClient).score(doc.getContent());
+        verify(scoringService).scoreDocument(doc.getContent());
         verify(pageRepo, never()).save(any());
         verify(kgNodeRepo, never()).save(any());
         verify(procLogRepo, atLeastOnce()).save(any());
@@ -112,8 +115,9 @@ class PipelineServiceTest {
     @Test
     void processDocument_shouldProcessWhenScoreAboveThreshold() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -135,7 +139,7 @@ class PipelineServiceTest {
 
         pipelineService.processDocument(rawDocId);
 
-        verify(aiClient).score(doc.getContent());
+        verify(scoringService).scoreDocument(doc.getContent());
         verify(aiClient).extractEntities(doc.getContent());
         verify(aiClient).extractConcepts(doc.getContent());
         verify(kgNodeRepo, atLeast(2)).save(any(KgNode.class));
@@ -149,8 +153,9 @@ class PipelineServiceTest {
                 .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
 
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
-        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
-        when(aiClient.score(doc.getContent())).thenReturn(scoreResult);
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
         when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
