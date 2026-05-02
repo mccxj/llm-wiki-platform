@@ -1,7 +1,10 @@
 package com.llmwiki.adapter.api;
 
-import com.llmwiki.adapter.dto.ScoreResult;
+import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
+import com.llmwiki.adapter.dto.ScoreResult;
+
+import java.util.List;
 
 /**
  * Abstract interface for AI/LLM API providers.
@@ -19,9 +22,19 @@ public interface AiApiClient {
     ExtractionResult extractEntities(String content);
 
     /**
+     * Extract entities from text with few-shot examples.
+     */
+    ExtractionResult extractEntities(String content, List<ExampleData> examples);
+
+    /**
      * Extract concepts from text.
      */
     ExtractionResult extractConcepts(String content);
+
+    /**
+     * Extract concepts from text with few-shot examples.
+     */
+    ExtractionResult extractConcepts(String content, List<ExampleData> examples);
 
     /**
      * Chat with the AI model.
