@@ -19,6 +19,6 @@ public class MaintenanceReport {
     private int contradictionCount;
     private List<Page> orphans;
     private List<Page> stalePages;
-    private List<List<Page>> duplicates;
+    private List<DuplicateGroup> duplicates;
     private List<Page> contradictions;
 }
