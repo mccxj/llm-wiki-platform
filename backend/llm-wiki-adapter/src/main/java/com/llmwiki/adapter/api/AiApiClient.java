@@ -17,10 +17,12 @@ public interface AiApiClient {
     ScoreResult score(String content);
 
     /**
-     * Extract entities from text.
+     * Extract entities from text (single-pass).
+     * This is the low-level method that MultiPassExtractor calls.
      */
     ExtractionResult extractEntities(String content);
 
+    /**
     /**
      * Extract entities from text with few-shot examples.
      */
@@ -45,4 +47,14 @@ public interface AiApiClient {
      * Check if the AI API service is available.
      */
     boolean isAvailable();
+
+    /**
+     * Extract entities with a specific temperature (single-pass).
+     */
+    ExtractionResult extractEntitiesWithTemperature(String content, double temperature);
+
+    /**
+     * Extract concepts with a specific temperature (single-pass).
+     */
+    ExtractionResult extractConceptsWithTemperature(String content, double temperature);
 }

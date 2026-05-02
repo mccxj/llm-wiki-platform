@@ -18,6 +18,9 @@ public class ExtractionResult {
         private String type;
         private String description;
         private List<String> relatedEntities;
+        private int passCount;
+        private double confidence;
+
         public EntityInfo() {}
         public EntityInfo(String name, String type, String description) {
             this.name = name; this.type = type; this.description = description;
@@ -33,12 +36,19 @@ public class ExtractionResult {
         public void setDescription(String description) { this.description = description; }
         public List<String> getRelatedEntities() { return relatedEntities; }
         public void setRelatedEntities(List<String> relatedEntities) { this.relatedEntities = relatedEntities; }
+        public int getPassCount() { return passCount; }
+        public void setPassCount(int passCount) { this.passCount = passCount; }
+        public double getConfidence() { return confidence; }
+        public void setConfidence(double confidence) { this.confidence = confidence; }
     }
 
     public static class ConceptInfo {
         private String name;
         private String description;
         private List<String> relatedEntities;
+        private int passCount;
+        private double confidence;
+
         public ConceptInfo() {}
         public ConceptInfo(String name, String description, List<String> relatedEntities) {
             this.name = name; this.description = description; this.relatedEntities = relatedEntities;
@@ -49,5 +59,9 @@ public class ExtractionResult {
         public void setDescription(String description) { this.description = description; }
         public List<String> getRelatedEntities() { return relatedEntities; }
         public void setRelatedEntities(List<String> relatedEntities) { this.relatedEntities = relatedEntities; }
+        public int getPassCount() { return passCount; }
+        public void setPassCount(int passCount) { this.passCount = passCount; }
+        public double getConfidence() { return confidence; }
+        public void setConfidence(double confidence) { this.confidence = confidence; }
     }
 }

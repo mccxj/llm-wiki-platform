@@ -45,6 +45,9 @@ pipeline:
   thread-pool-size: 4
   retry-max-attempts: 3
   retry-delay-ms: 1000
+  extraction:
+    passes: 1
+    temperatures: "0.1,0.3,0.5"
 
 sync:
   enabled: true

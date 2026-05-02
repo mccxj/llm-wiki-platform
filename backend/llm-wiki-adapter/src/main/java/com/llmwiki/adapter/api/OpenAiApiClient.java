@@ -220,6 +220,91 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     @Override
+    public ExtractionResult extractEntitiesWithTemperature(String content, double temperature) {
+        try {
+            List<String> chunks = splitIntoChunks(content, 7000);
+            List<EntityInfo> allEntities = new ArrayList<>();
+
+            for (String chunk : chunks) {
+                String response = callApi(entitySystemPrompt, chunk, temperature);
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode arr = root.get("entities");
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode node : arr) {
+                        List<String> related = new ArrayList<>();
+                        JsonNode rel = node.get("related_entities");
+                        if (rel != null && rel.isArray()) {
+                            for (JsonNode r : rel) related.add(r.asText());
+                        }
+                        allEntities.add(new EntityInfo(
+                                node.get("name").asText(),
+                                node.get("type").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
+                }
+            }
+
+            Map<String, EntityInfo> deduped = new LinkedHashMap<>();
+            for (EntityInfo e : allEntities) {
+                String key = e.getName().toLowerCase();
+                if (!deduped.containsKey(key)) {
+                    deduped.put(key, e);
+                }
+            }
+            ExtractionResult merged = new ExtractionResult();
+            merged.setEntities(new ArrayList<>(deduped.values()));
+            merged.setConcepts(Collections.emptyList());
+            return merged;
+        } catch (Exception e) {
+            log.error("Failed to extract entities with temperature {}", temperature, e);
+            return new ExtractionResult();
+        }
+    }
+
+    @Override
+    public ExtractionResult extractConceptsWithTemperature(String content, double temperature) {
+        try {
+            List<String> chunks = splitIntoChunks(content, 7000);
+            List<ConceptInfo> allConcepts = new ArrayList<>();
+
+            for (String chunk : chunks) {
+                String response = callApi(conceptSystemPrompt, chunk, temperature);
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode arr = root.get("concepts");
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode node : arr) {
+                        List<String> related = new ArrayList<>();
+                        JsonNode rel = node.get("related_entities");
+                        if (rel != null && rel.isArray()) {
+                            for (JsonNode r : rel) related.add(r.asText());
+                        }
+                        allConcepts.add(new ConceptInfo(
+                                node.get("name").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
+                }
+            }
+
+            Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
+            for (ConceptInfo c : allConcepts) {
+                String key = c.getName().toLowerCase();
+                if (!deduped.containsKey(key)) {
+                    deduped.put(key, c);
+                }
+            }
+            ExtractionResult merged = new ExtractionResult();
+            merged.setEntities(Collections.emptyList());
+            merged.setConcepts(new ArrayList<>(deduped.values()));
+            return merged;
+        } catch (Exception e) {
+            log.error("Failed to extract concepts with temperature {}", temperature, e);
+            return new ExtractionResult();
+        }
+    }
+
+    @Override
     public boolean isAvailable() {
         try {
             webClient.get().uri("/models")
@@ -250,12 +335,16 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     private String callApi(String systemPrompt, String userMessage) {
+        return callApi(systemPrompt, userMessage, 0.1);
+    }
+
+    private String callApi(String systemPrompt, String userMessage, double temperature) {
         Map<String, Object> body = Map.of(
                 "model", model,
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
                         Map.of("role", "user", "content", userMessage)),
-                "temperature", 0.1,
+                "temperature", temperature,
                 "max_tokens", 2000);
 
         Map<String, Object> response = webClient.post()

@@ -2,6 +2,7 @@ package com.llmwiki.service.pipeline;
 
 import com.llmwiki.adapter.api.AiApiClient;
 import com.llmwiki.adapter.api.EmbeddingClient;
+import com.llmwiki.adapter.extraction.MultiPassExtractor;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
@@ -31,6 +32,7 @@ import com.llmwiki.domain.config.repository.SystemConfigRepository;
 import com.llmwiki.service.scoring.ScoringService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,6 +62,10 @@ public class PipelineService {
     private final AiApiClient aiClient;
     private final EmbeddingClient embeddingClient;
     private final ScoringService scoringService;
+    private final MultiPassExtractor multiPassExtractor;
+
+    @Value("${pipeline.extraction.temperatures:0.1,0.3,0.5}")
+    private String extractionTemperatures;
 
     @Transactional
     public void processDocument(UUID rawDocId) {
@@ -241,11 +247,22 @@ public class PipelineService {
     }
 
     private ExtractionResult extractEntities(RawDocument doc) {
-        return aiClient.extractEntities(doc.getContent());
+        ExtractionResult result = new ExtractionResult();
+        Set<String> entityTypes = Set.of("PERSON", "ORG", "TECH", "TOOL", "OTHER");
+        List<ExtractionResult.EntityInfo> entities = multiPassExtractor.extractAll(doc.getContent(), entityTypes);
+        result.setEntities(entities);
+        result.setConcepts(Collections.emptyList());
+        return result;
     }
 
     private ExtractionResult extractConcepts(RawDocument doc) {
-        return aiClient.extractConcepts(doc.getContent());
+        ExtractionResult result = aiClient.extractConcepts(doc.getContent());
+        if (result == null) {
+            result = new ExtractionResult();
+            result.setEntities(Collections.emptyList());
+            result.setConcepts(Collections.emptyList());
+        }
+        return result;
     }
 
     private List<KgNode> matchKnowledgeGraph(ExtractionResult entities, ExtractionResult concepts) {
