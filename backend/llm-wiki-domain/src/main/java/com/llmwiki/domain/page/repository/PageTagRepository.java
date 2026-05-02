@@ -11,4 +11,6 @@ import java.util.UUID;
 @Repository
 public interface PageTagRepository extends JpaRepository<PageTag, PageTagId> {
     List<PageTag> findByPageId(UUID pageId);
+
+    List<PageTag> findByTagIgnoreCase(String tag);
 }

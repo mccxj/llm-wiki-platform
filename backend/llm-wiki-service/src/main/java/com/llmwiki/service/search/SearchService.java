@@ -94,9 +94,7 @@ public class SearchService {
             if (request.getTags() != null && !request.getTags().isEmpty()) {
                 Set<UUID> taggedNodeIds = new HashSet<>();
                 for (String tag : request.getTags()) {
-                    List<PageTag> pageTags = pageTagRepo.findAll().stream()
-                            .filter(pt -> pt.getTag().equalsIgnoreCase(tag))
-                            .collect(Collectors.toList());
+                    List<PageTag> pageTags = pageTagRepo.findByTagIgnoreCase(tag);
                     for (PageTag pt : pageTags) {
                         // Find nodes associated with tagged pages
                         pageRepo.findById(pt.getPageId()).ifPresent(page -> {
@@ -146,9 +144,7 @@ public class SearchService {
         List<SearchResult> results = new ArrayList<>();
 
         // Find all pages with the given tag
-        List<PageTag> pageTags = pageTagRepo.findAll().stream()
-                .filter(pt -> pt.getTag().equalsIgnoreCase(tag))
-                .collect(Collectors.toList());
+        List<PageTag> pageTags = pageTagRepo.findByTagIgnoreCase(tag);
 
         for (PageTag pageTag : pageTags) {
             pageRepo.findById(pageTag.getPageId()).ifPresent(page -> {

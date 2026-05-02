@@ -171,6 +171,45 @@ class SearchServiceTest {
     }
 
     @Test
+    void search_shouldFilterByTag() {
+        float[] queryEmbedding = new float[1536];
+        queryEmbedding[0] = 1.0f;
+
+        UUID tagPageId = UUID.randomUUID();
+        KgNode taggedNode = KgNode.builder()
+                .id(nodeId).name("Java").nodeType(NodeType.ENTITY)
+                .description("A programming language").pageId(tagPageId).build();
+        KgNode otherNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Python").nodeType(NodeType.ENTITY)
+                .description("Another language").build();
+
+        Object[] row1 = {nodeId, 0.3};
+        Object[] row2 = {otherNode.getId(), 0.5};
+
+        PageTag pageTag = PageTag.builder().pageId(tagPageId).tag("jvm").build();
+
+        when(embeddingClient.embed("test")).thenReturn(queryEmbedding);
+        setupVectorSearch(List.of(row1, row2));
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(taggedNode));
+        when(nodeRepo.findById(otherNode.getId())).thenReturn(Optional.of(otherNode));
+        when(pageRepo.findById(tagPageId)).thenReturn(Optional.of(page));
+        when(pageTagRepo.findByTagIgnoreCase("jvm")).thenReturn(List.of(pageTag));
+        when(nodeRepo.findAll()).thenReturn(List.of(taggedNode));
+
+        SearchRequest request = SearchRequest.builder()
+                .query("test")
+                .tags(List.of("jvm"))
+                .limit(10)
+                .build();
+        List<SearchService.SearchResult> results = searchService.search(request);
+
+        assertEquals(1, results.size());
+        assertEquals("Java", results.get(0).nodeName);
+        verify(pageTagRepo).findByTagIgnoreCase("jvm");
+        verify(pageTagRepo, never()).findAll();
+    }
+
+    @Test
     void searchByTag_shouldReturnResultsFromPageTags() {
         UUID tagPageId = UUID.randomUUID();
         PageTag pageTag = PageTag.builder().pageId(tagPageId).tag("java").build();
@@ -181,7 +220,7 @@ class SearchServiceTest {
                 .id(tagPageId).title("Spring Framework").slug("spring")
                 .content("Spring is a framework...").status(PageStatus.APPROVED).build();
 
-        when(pageTagRepo.findAll()).thenReturn(List.of(pageTag));
+        when(pageTagRepo.findByTagIgnoreCase("java")).thenReturn(List.of(pageTag));
         when(pageRepo.findById(tagPageId)).thenReturn(Optional.of(taggedPage));
         when(nodeRepo.findAll()).thenReturn(List.of(taggedNode));
 
@@ -189,17 +228,21 @@ class SearchServiceTest {
 
         assertFalse(results.isEmpty());
         assertEquals("Spring", results.get(0).nodeName);
+        verify(pageTagRepo).findByTagIgnoreCase("java");
+        verify(pageTagRepo, never()).findAll();
     }
 
     @Test
     void searchByTag_shouldFallbackToNameMatch() {
-        when(pageTagRepo.findAll()).thenReturn(Collections.emptyList());
+        when(pageTagRepo.findByTagIgnoreCase("python")).thenReturn(Collections.emptyList());
         when(nodeRepo.findByNameContaining("python")).thenReturn(List.of(node));
 
         List<SearchService.SearchResult> results = searchService.searchByTag("python", 20);
 
         assertFalse(results.isEmpty());
         assertEquals("Java", results.get(0).nodeName);
+        verify(pageTagRepo).findByTagIgnoreCase("python");
+        verify(pageTagRepo, never()).findAll();
     }
 
     @Test
