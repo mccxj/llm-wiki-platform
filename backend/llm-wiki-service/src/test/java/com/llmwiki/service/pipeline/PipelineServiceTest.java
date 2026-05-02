@@ -146,7 +146,7 @@ class PipelineServiceTest {
         verify(aiClient).extractEntities(doc.getContent());
         verify(aiClient).extractConcepts(doc.getContent());
         verify(kgNodeRepo, atLeast(3)).save(any(KgNode.class));
-        verify(pageRepo).save(any(Page.class));
+        verify(pageRepo, atLeast(1)).save(any(Page.class));
         verify(approvalQueueRepo).save(any());
     }
 
@@ -339,8 +339,10 @@ class PipelineServiceTest {
         pipelineService.processDocument(rawDocId);
 
         ArgumentCaptor<Page> pageCaptor = ArgumentCaptor.forClass(Page.class);
-        verify(pageRepo).save(pageCaptor.capture());
-        assertEquals("java-programming-1", pageCaptor.getValue().getSlug());
+        verify(pageRepo, atLeast(1)).save(pageCaptor.capture());
+        // The last save should have the slug
+        List<Page> savedPages = pageCaptor.getAllValues();
+        assertEquals("java-programming-1", savedPages.get(savedPages.size() - 1).getSlug());
     }
 
     // ===== Retry + DLQ Tests =====

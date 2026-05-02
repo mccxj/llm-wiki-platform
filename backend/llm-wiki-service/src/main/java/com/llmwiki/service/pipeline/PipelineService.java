@@ -96,6 +96,12 @@ public class PipelineService {
         if (matchedNodes == null) return;
         saveStepLog(rawDocId, "GRAPH_MATCHING", StepStatus.SUCCESS, "Matched " + matchedNodes.size() + " graph nodes");
 
+        // Step 4.5: Create COMPARISON and QUERY nodes (Karpathy 3-layer)
+        Integer comparisons = executeWithRetry(rawDocId, "COMPARISON_CREATION", () -> createComparisonNodes(entities));
+        saveStepLog(rawDocId, "COMPARISON_CREATION", StepStatus.SUCCESS, "Created " + (comparisons != null ? comparisons : 0) + " comparison nodes");
+        Integer queries = executeWithRetry(rawDocId, "QUERY_CREATION", () -> createQueryNodes(doc));
+        saveStepLog(rawDocId, "QUERY_CREATION", StepStatus.SUCCESS, "Created " + (queries != null ? queries : 0) + " query nodes");
+
         // Step 5: Page Generation
         Page page = executeWithRetry(rawDocId, "PAGE_GENERATION", () -> generatePage(doc, scoreResult, entities, concepts));
         if (page == null) return;
@@ -113,8 +119,10 @@ public class PipelineService {
         saveStepLog(rawDocId, "CROSS_LINKING", StepStatus.SUCCESS, "Created " + (links != null ? links : 0) + " cross-links");
 
         // Step 8: Consistency Check
-        boolean consistent = consistencyCheck(page);
-        saveStepLog(rawDocId, "CONSISTENCY_CHECK", consistent ? StepStatus.SUCCESS : StepStatus.FAILED, consistent ? "OK" : "Issues found");
+        ConsistencyReport consistencyReport = consistencyCheck(page, entities);
+        saveStepLog(rawDocId, "CONSISTENCY_CHECK",
+                consistencyReport.isPassed() ? StepStatus.SUCCESS : StepStatus.FAILED,
+                consistencyReport.isPassed() ? "OK" : String.join("; ", consistencyReport.getIssues()));
 
         log.info("Pipeline completed for document: {}", doc.getId());
     }
@@ -336,6 +344,71 @@ public class PipelineService {
         }
     }
 
+    /**
+     * 创建 COMPARISON 节点：当2+实体共享同一类型时，自动生成比较节点
+     */
+    private Integer createComparisonNodes(ExtractionResult entities) {
+        int count = 0;
+        java.util.Map<String, java.util.List<ExtractionResult.EntityInfo>> byType = new java.util.LinkedHashMap<>();
+        for (var entity : entities.getEntities()) {
+            if (entity.getType() != null) {
+                byType.computeIfAbsent(entity.getType(), k -> new java.util.ArrayList<>()).add(entity);
+            }
+        }
+        for (var entry : byType.entrySet()) {
+            if (entry.getValue().size() >= 2) {
+                String names = entry.getValue().stream()
+                        .map(ExtractionResult.EntityInfo::getName)
+                        .collect(java.util.stream.Collectors.joining(" vs "));
+                String compName = "Comparison: " + names;
+                Optional<KgNode> existing = kgNodeRepo.findByNameAndNodeType(compName, NodeType.COMPARISON);
+                if (existing.isEmpty()) {
+                    KgNode compNode = kgNodeRepo.save(KgNode.builder()
+                            .name(compName)
+                            .nodeType(NodeType.COMPARISON)
+                            .description("Auto-generated comparison of " + entry.getKey() + " entities")
+                            .build());
+                    embedAndSave(compNode);
+                    // Link comparison node to all entities in the group
+                    for (var entity : entry.getValue()) {
+                        kgNodeRepo.findByNameAndNodeType(entity.getName(), NodeType.ENTITY).ifPresent(entNode -> {
+                            createEdgeIfNotExists(compNode.getId(), entNode.getId(), EdgeType.RELATED_TO);
+                        });
+                    }
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 创建 QUERY 节点：从内容中提取问题句（包含? 或以 What/How/Why 开头）
+     */
+    private Integer createQueryNodes(RawDocument doc) {
+        int count = 0;
+        if (doc.getContent() == null) return count;
+        String[] lines = doc.getContent().split("\n");
+        java.util.regex.Pattern questionPattern = java.util.regex.Pattern.compile("^(What|How|Why|When|Where|Who|Which|Is|Are|Can|Does)\\b", java.util.regex.Pattern.CASE_INSENSITIVE);
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.contains("?") || questionPattern.matcher(trimmed).find()) {
+                String queryName = "Query: " + (trimmed.length() > 80 ? trimmed.substring(0, 80) + "..." : trimmed);
+                Optional<KgNode> existing = kgNodeRepo.findByNameAndNodeType(queryName, NodeType.QUERY);
+                if (existing.isEmpty()) {
+                    KgNode queryNode = kgNodeRepo.save(KgNode.builder()
+                            .name(queryName)
+                            .nodeType(NodeType.QUERY)
+                            .description("Auto-extracted question from document")
+                            .build());
+                    embedAndSave(queryNode);
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
     private void createEdgeIfNotExists(UUID sourceId, UUID targetId, EdgeType type) {
         // Check if edge already exists to avoid duplicates
         List<KgEdge> existing = kgEdgeRepo.findBySourceNodeId(sourceId);
@@ -402,7 +475,27 @@ public class PipelineService {
             pageTagRepo.save(PageTag.builder().pageId(page.getId()).tag(tag).build());
         }
 
+        // Generate document-level vector embedding
+        embedPageContent(page);
+
         return page;
+    }
+
+    private void embedPageContent(Page page) {
+        try {
+            float[] embedding = embeddingClient.embed(page.getContent());
+            // Store as JSON array string for H2 compatibility
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < embedding.length; i++) {
+                if (i > 0) sb.append(",");
+                sb.append(embedding[i]);
+            }
+            sb.append("]");
+            page.setContentVector(sb.toString());
+            pageRepo.save(page);
+        } catch (Exception e) {
+            log.warn("Failed to embed page content {}: {}", page.getId(), e.getMessage());
+        }
     }
 
     private String generateUniqueSlug(String title) {
@@ -445,9 +538,54 @@ public class PipelineService {
         return count;
     }
 
-    private boolean consistencyCheck(Page page) {
-        return page.getTitle() != null && !page.getTitle().isEmpty()
-                && page.getContent() != null && page.getContent().length() >= 50;
+    private ConsistencyReport consistencyCheck(Page page, ExtractionResult entities) {
+        List<String> issues = new ArrayList<>();
+        int linkedPagesCount = 0;
+
+        // 1. Check title
+        if (page.getTitle() == null || page.getTitle().isEmpty()) {
+            issues.add("Page title is empty");
+        }
+
+        // 2. Check content length
+        if (page.getContent() == null || page.getContent().length() < 50) {
+            issues.add("Page content is too short (minimum 50 chars)");
+        }
+
+        // 3. Check slug is URL-safe
+        if (page.getSlug() == null || page.getSlug().isEmpty()) {
+            issues.add("Page slug is empty");
+        } else if (!page.getSlug().matches("[a-z0-9-]+")) {
+            issues.add("Page slug contains invalid characters: " + page.getSlug());
+        }
+
+        // 4. Check all entity names appear in page content
+        int entityCount = entities.getEntities().size();
+        if (page.getContent() != null && entities.getEntities() != null) {
+            for (var entity : entities.getEntities()) {
+                if (entity.getName() != null && !page.getContent().contains(entity.getName())) {
+                    issues.add("Entity '" + entity.getName() + "' not found in page content");
+                }
+            }
+        }
+
+        // 5. Check linked page IDs exist (no dangling links)
+        List<PageLink> links = pageLinkRepo.findBySourcePageId(page.getId());
+        for (PageLink link : links) {
+            if (!pageRepo.existsById(link.getTargetPageId())) {
+                issues.add("Dangling link to non-existent page: " + link.getTargetPageId());
+            } else {
+                linkedPagesCount++;
+            }
+        }
+
+        boolean passed = issues.isEmpty();
+        return ConsistencyReport.builder()
+                .passed(passed)
+                .issues(issues)
+                .entityCount(entityCount)
+                .linkedPagesCount(linkedPagesCount)
+                .build();
     }
 
     private void saveStepLog(UUID rawDocId, String step, StepStatus status, String detail) {
