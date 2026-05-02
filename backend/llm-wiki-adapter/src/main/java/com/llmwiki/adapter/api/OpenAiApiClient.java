@@ -29,14 +29,14 @@ public class OpenAiApiClient implements AiApiClient {
 
     private static final String SCORE_SYSTEM_PROMPT = """
             You are a document quality analyzer. Score the document on these dimensions (0-10 each):
-            1. Relevance - How relevant is this to a knowledge base?
-            2. Completeness - Does it cover the topic adequately?
-            3. Accuracy - Is the information factually sound?
-            4. Clarity - Is it well-written and understandable?
-            5. Structure - Is it well-organized?
-            
+            1. information_density - How much useful information does the document contain per unit of text?
+            2. entity_richness - How many notable entities (people, organizations, technologies, concepts) are mentioned?
+            3. knowledge_independence - Can the document be understood as a standalone piece without external context?
+            4. structure_integrity - Is the document well-organized with clear sections and logical flow?
+            5. timeliness - Is the information current and up-to-date?
+
             Respond in JSON format:
-            {"scores":{"relevance":N,"completeness":N,"accuracy":N,"clarity":N,"structure":N},"overall_score":N,"reason":"explanation","key_entities":["entity1","entity2"],"suggested_tags":["tag1","tag2"]}
+            {"scores":{"information_density":N,"entity_richness":N,"knowledge_independence":N,"structure_integrity":N,"timeliness":N},"overall_score":N,"reason":"explanation","key_entities":["entity1","entity2"],"suggested_tags":["tag1","tag2"]}
             """;
 
     private static final String ENTITY_SYSTEM_PROMPT = """

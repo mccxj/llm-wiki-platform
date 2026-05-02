@@ -199,9 +199,10 @@ CREATE TABLE system_config (
 -- Seed: default scoring threshold config
 -- =============================================
 INSERT INTO system_config (config_key, config_value, description) VALUES
-('scoring.threshold', '60.0', 'Minimum AI score (0-100) for document processing'),
-('scoring.dimensions', 'relevance,completeness,accuracy,clarity', 'Scoring dimensions'),
+('scoring.threshold', '5.0', 'Minimum AI score (0-10) for document processing'),
+('scoring.dimensions', 'information_density,entity_richness,knowledge_independence,structure_integrity,timeliness', 'Scoring dimensions'),
 ('embedding.dimension', '1536', 'Embedding vector dimension'),
 ('embedding.model', 'text-embedding-ada-002', 'Embedding model name'),
 ('sync.batch.size', '50', 'Max documents per sync batch'),
-('pipeline.max.retries', '3', 'Max retries for failed pipeline steps');
+('pipeline.max.retries', '3', 'Max retries for failed pipeline steps'),
+('scoring.weights', 'information_density:0.3,entity_richness:0.25,knowledge_independence:0.2,structure_integrity:0.15,timeliness:0.1', 'Scoring dimension weights');

@@ -8,11 +8,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 评分服务：调用AI对文档进行多维度评分，并判断是否通过阈值。
+ * 评分服务：调用AI对文档进行多维度评分，计算加权分数，并判断是否通过阈值。
  */
 @Service
 @RequiredArgsConstructor
@@ -27,20 +28,43 @@ public class ScoringService {
     private static final BigDecimal DEFAULT_THRESHOLD = new BigDecimal("5.0");
 
     /**
-     * 对文档内容进行AI评分。
+     * 对文档内容进行AI评分，并计算加权总分。
      *
      * @param content 文档内容
-     * @return 评分结果
+     * @return 评分结果（overallScore 为加权计算后的分数）
      */
     public ScoreResult scoreDocument(String content) {
         if (content == null || content.isBlank()) {
             log.warn("Empty content provided for scoring");
-            ScoreResult emptyResult = new ScoreResult();
-            emptyResult.setOverallScore(BigDecimal.ZERO);
-            emptyResult.setReason("内容为空");
-            return emptyResult;
+            return ScoreResult.builder()
+                    .overallScore(BigDecimal.ZERO)
+                    .reason("内容为空")
+                    .build();
         }
-        return aiClient.score(content);
+        ScoreResult result = aiClient.score(content);
+        // 计算加权分数并覆盖 overallScore
+        BigDecimal weightedScore = calculateWeightedScore(result.getScores());
+        result.setOverallScore(weightedScore);
+        return result;
+    }
+
+    /**
+     * 根据各维度分数和权重计算加权总分。
+     *
+     * @param scores 各维度分数映射
+     * @return 加权总分（0-10）
+     */
+    public BigDecimal calculateWeightedScore(Map<String, Integer> scores) {
+        if (scores == null || scores.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        Map<String, BigDecimal> weights = getScoreWeights();
+        BigDecimal weightedSum = BigDecimal.ZERO;
+        for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+            BigDecimal weight = weights.getOrDefault(entry.getKey(), BigDecimal.ZERO);
+            weightedSum = weightedSum.add(BigDecimal.valueOf(entry.getValue()).multiply(weight));
+        }
+        return weightedSum.setScale(2, RoundingMode.HALF_UP);
     }
 
     /**
@@ -65,6 +89,24 @@ public class ScoringService {
                 .orElse(DEFAULT_THRESHOLD);
 
         return result.getOverallScore().compareTo(threshold) >= 0;
+    }
+
+    /**
+     * 获取评分阈值。
+     *
+     * @return 阈值（默认 5.0，0-10 分制）
+     */
+    public BigDecimal getThreshold() {
+        return configRepo.findByKey(THRESHOLD_KEY)
+                .map(config -> {
+                    try {
+                        return new BigDecimal(config.getValue());
+                    } catch (NumberFormatException e) {
+                        log.warn("Invalid threshold value: {}, using default", config.getValue());
+                        return DEFAULT_THRESHOLD;
+                    }
+                })
+                .orElse(DEFAULT_THRESHOLD);
     }
 
     /**
