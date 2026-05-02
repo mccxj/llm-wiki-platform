@@ -41,6 +41,7 @@ public class Page {
     @Builder.Default
     private Boolean contested = false;
 
+    @Column(name = "score")
     private BigDecimal aiScore;
 
     @Column(columnDefinition = "TEXT")
