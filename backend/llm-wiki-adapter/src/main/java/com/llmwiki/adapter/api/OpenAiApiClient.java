@@ -27,7 +27,7 @@ public class OpenAiApiClient implements AiApiClient {
     private final WebClient webClient;
     private final String model;
 
-    private static final String SCORE_SYSTEM_PROMPT = """
+    private static final String SCORE_SYSTEM_PROMPT_DEFAULT = """
             You are a document quality analyzer. Score the document on these dimensions (0-10 each):
             1. information_density - How much useful information does the document contain per unit of text?
             2. entity_richness - How many notable entities (people, organizations, technologies, concepts) are mentioned?
@@ -39,26 +39,38 @@ public class OpenAiApiClient implements AiApiClient {
             {"scores":{"information_density":N,"entity_richness":N,"knowledge_independence":N,"structure_integrity":N,"timeliness":N},"overall_score":N,"reason":"explanation","key_entities":["entity1","entity2"],"suggested_tags":["tag1","tag2"]}
             """;
 
-    private static final String ENTITY_SYSTEM_PROMPT = """
-            Extract named entities from the text. Identify people, organizations, technologies, 
-            concepts, tools, and other important named things.
-            
+    private static final String ENTITY_SYSTEM_PROMPT_DEFAULT = """
+            Extract named entities from the text. Identify people, organizations, technologies,
+            tools, and other important named things. Do NOT include abstract concepts — those are handled separately.
+
+            Also identify relationships between entities found in the text.
+
             Respond in JSON format:
-            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|CONCEPT|TOOL|OTHER","description":"brief description"}]}
+            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity_name"]}]}
             """;
 
-    private static final String CONCEPT_SYSTEM_PROMPT = """
+    private static final String CONCEPT_SYSTEM_PROMPT_DEFAULT = """
             Extract key concepts and themes from the text. A concept is an abstract idea or topic.
-            
+
             Respond in JSON format:
             {"concepts":[{"name":"concept_name","description":"brief description","related_entities":["entity1","entity2"]}]}
             """;
 
+    private final String scoreSystemPrompt;
+    private final String entitySystemPrompt;
+    private final String conceptSystemPrompt;
+
     public OpenAiApiClient(
             @Value("${ai.api.base-url:http://localhost:8000/v1}") String baseUrl,
             @Value("${ai.api.key:sk-local}") String apiKey,
-            @Value("${ai.model:gpt-4o-mini}") String model) {
+            @Value("${ai.model:gpt-4o-mini}") String model,
+            @Value("${ai.prompt.score:}") String scorePrompt,
+            @Value("${ai.prompt.entity:}") String entityPrompt,
+            @Value("${ai.prompt.concept:}") String conceptPrompt) {
         this.model = model;
+        this.scoreSystemPrompt = scorePrompt.isEmpty() ? SCORE_SYSTEM_PROMPT_DEFAULT : scorePrompt;
+        this.entitySystemPrompt = entityPrompt.isEmpty() ? ENTITY_SYSTEM_PROMPT_DEFAULT : entityPrompt;
+        this.conceptSystemPrompt = conceptPrompt.isEmpty() ? CONCEPT_SYSTEM_PROMPT_DEFAULT : conceptPrompt;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
@@ -69,7 +81,7 @@ public class OpenAiApiClient implements AiApiClient {
     @Override
     public ScoreResult score(String content) {
         try {
-            String response = callApi(SCORE_SYSTEM_PROMPT, content);
+            String response = callApi(scoreSystemPrompt, content);
             JsonNode root = MAPPER.readTree(response);
 
             ScoreResult result = new ScoreResult();
@@ -104,23 +116,42 @@ public class OpenAiApiClient implements AiApiClient {
     @Override
     public ExtractionResult extractEntities(String content) {
         try {
-            String response = callApi(ENTITY_SYSTEM_PROMPT, content);
-            JsonNode root = MAPPER.readTree(response);
+            // P1-3: Split long documents into chunks to avoid truncation
+            List<String> chunks = splitIntoChunks(content, 7000);
+            ExtractionResult merged = new ExtractionResult();
+            List<EntityInfo> allEntities = new ArrayList<>();
 
-            ExtractionResult result = new ExtractionResult();
-            List<EntityInfo> entities = new ArrayList<>();
-            JsonNode arr = root.get("entities");
-            if (arr != null && arr.isArray()) {
-                for (JsonNode node : arr) {
-                    entities.add(new EntityInfo(
-                            node.get("name").asText(),
-                            node.get("type").asText(),
-                            node.has("description") ? node.get("description").asText() : ""));
+            for (String chunk : chunks) {
+                String response = callApi(entitySystemPrompt, chunk);
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode arr = root.get("entities");
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode node : arr) {
+                        List<String> related = new ArrayList<>();
+                        JsonNode rel = node.get("related_entities");
+                        if (rel != null && rel.isArray()) {
+                            for (JsonNode r : rel) related.add(r.asText());
+                        }
+                        allEntities.add(new EntityInfo(
+                                node.get("name").asText(),
+                                node.get("type").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
                 }
             }
-            result.setEntities(entities);
-            result.setConcepts(Collections.emptyList());
-            return result;
+
+            // Deduplicate by name (keep first occurrence)
+            Map<String, EntityInfo> deduped = new LinkedHashMap<>();
+            for (EntityInfo e : allEntities) {
+                String key = e.getName().toLowerCase();
+                if (!deduped.containsKey(key)) {
+                    deduped.put(key, e);
+                }
+            }
+            merged.setEntities(new ArrayList<>(deduped.values()));
+            merged.setConcepts(Collections.emptyList());
+            return merged;
         } catch (Exception e) {
             log.error("Failed to extract entities", e);
             return new ExtractionResult();
@@ -130,28 +161,41 @@ public class OpenAiApiClient implements AiApiClient {
     @Override
     public ExtractionResult extractConcepts(String content) {
         try {
-            String response = callApi(CONCEPT_SYSTEM_PROMPT, content);
-            JsonNode root = MAPPER.readTree(response);
+            // P1-3: Split long documents into chunks
+            List<String> chunks = splitIntoChunks(content, 7000);
+            ExtractionResult merged = new ExtractionResult();
+            List<ConceptInfo> allConcepts = new ArrayList<>();
 
-            ExtractionResult result = new ExtractionResult();
-            result.setEntities(Collections.emptyList());
-            List<ConceptInfo> concepts = new ArrayList<>();
-            JsonNode arr = root.get("concepts");
-            if (arr != null && arr.isArray()) {
-                for (JsonNode node : arr) {
-                    List<String> related = new ArrayList<>();
-                    JsonNode rel = node.get("related_entities");
-                    if (rel != null && rel.isArray()) {
-                        for (JsonNode r : rel) related.add(r.asText());
+            for (String chunk : chunks) {
+                String response = callApi(conceptSystemPrompt, chunk);
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode arr = root.get("concepts");
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode node : arr) {
+                        List<String> related = new ArrayList<>();
+                        JsonNode rel = node.get("related_entities");
+                        if (rel != null && rel.isArray()) {
+                            for (JsonNode r : rel) related.add(r.asText());
+                        }
+                        allConcepts.add(new ConceptInfo(
+                                node.get("name").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
                     }
-                    concepts.add(new ConceptInfo(
-                            node.get("name").asText(),
-                            node.has("description") ? node.get("description").asText() : "",
-                            related));
                 }
             }
-            result.setConcepts(concepts);
-            return result;
+
+            // Deduplicate by name
+            Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
+            for (ConceptInfo c : allConcepts) {
+                String key = c.getName().toLowerCase();
+                if (!deduped.containsKey(key)) {
+                    deduped.put(key, c);
+                }
+            }
+            merged.setEntities(Collections.emptyList());
+            merged.setConcepts(new ArrayList<>(deduped.values()));
+            return merged;
         } catch (Exception e) {
             log.error("Failed to extract concepts", e);
             return new ExtractionResult();
@@ -184,7 +228,7 @@ public class OpenAiApiClient implements AiApiClient {
                 "model", model,
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
-                        Map.of("role", "user", "content", truncate(userMessage, 8000))),
+                        Map.of("role", "user", "content", userMessage)),
                 "temperature", 0.1,
                 "max_tokens", 2000);
 
@@ -215,7 +259,30 @@ public class OpenAiApiClient implements AiApiClient {
         return list;
     }
 
-    private String truncate(String text, int maxLen) {
-        return text.length() <= maxLen ? text : text.substring(0, maxLen);
+    /**
+     * Split text into chunks at paragraph boundaries, each不超过 maxChunkLen chars.
+     * Used for P1-3: avoid truncating long documents.
+     */
+    private List<String> splitIntoChunks(String text, int maxChunkLen) {
+        if (text.length() <= maxChunkLen) return List.of(text);
+        List<String> chunks = new ArrayList<>();
+        // Split on double newline (paragraph boundary)
+        String[] paragraphs = text.split("\\n\\n+");
+        StringBuilder current = new StringBuilder();
+        for (String para : paragraphs) {
+            if (current.length() + para.length() + 2 > maxChunkLen && !current.isEmpty()) {
+                chunks.add(current.toString());
+                current = new StringBuilder();
+            }
+            if (!current.isEmpty()) current.append("\n\n");
+            current.append(para);
+            // If a single paragraph exceeds maxChunkLen, force-split it
+            if (current.length() > maxChunkLen) {
+                chunks.add(current.toString());
+                current = new StringBuilder();
+            }
+        }
+        if (!current.isEmpty()) chunks.add(current.toString());
+        return chunks;
     }
 }

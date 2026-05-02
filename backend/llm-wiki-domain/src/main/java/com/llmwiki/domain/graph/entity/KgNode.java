@@ -24,6 +24,8 @@ public class KgNode {
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    private String entitySubType;
+
     private UUID pageId;
     private Instant createdAt;
     private Instant updatedAt;

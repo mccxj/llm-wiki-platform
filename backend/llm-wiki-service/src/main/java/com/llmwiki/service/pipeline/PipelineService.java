@@ -242,20 +242,49 @@ public class PipelineService {
 
     private List<KgNode> matchKnowledgeGraph(ExtractionResult entities, ExtractionResult concepts) {
         List<KgNode> matched = new ArrayList<>();
+        // Build a name→node map for all entities in this document (for entity-entity edge creation)
+        Map<String, KgNode> entityNodeMap = new LinkedHashMap<>();
 
         for (EntityInfo entity : entities.getEntities()) {
             Optional<KgNode> existing = kgNodeRepo.findByNameAndNodeType(entity.getName(), NodeType.ENTITY);
             if (existing.isPresent()) {
-                matched.add(existing.get());
+                KgNode node = existing.get();
+                // P1-4: Update description if the new one is richer
+                if (entity.getDescription() != null && !entity.getDescription().isEmpty()
+                        && (node.getDescription() == null || node.getDescription().length() < entity.getDescription().length())) {
+                    node.setDescription(entity.getDescription());
+                    // Also update sub-type if previously null
+                    if (node.getEntitySubType() == null && entity.getType() != null) {
+                        node.setEntitySubType(entity.getType());
+                    }
+                    kgNodeRepo.save(node);
+                }
+                matched.add(node);
+                entityNodeMap.put(entity.getName().toLowerCase(), node);
             } else {
                 KgNode node = kgNodeRepo.save(KgNode.builder()
                         .name(entity.getName())
                         .nodeType(NodeType.ENTITY)
                         .description(entity.getDescription())
+                        .entitySubType(entity.getType())
                         .build());
                 embedAndSave(node);
                 matched.add(node);
-                log.debug("Created KG entity node: {}", entity.getName());
+                entityNodeMap.put(entity.getName().toLowerCase(), node);
+                log.debug("Created KG entity node: {} (type={})", entity.getName(), entity.getType());
+            }
+        }
+
+        // P0-2: Create entity-entity edges from entity relations
+        for (EntityInfo entity : entities.getEntities()) {
+            KgNode sourceNode = entityNodeMap.get(entity.getName().toLowerCase());
+            if (sourceNode == null) continue;
+            if (entity.getRelatedEntities() == null) continue;
+            for (String relatedName : entity.getRelatedEntities()) {
+                KgNode targetNode = entityNodeMap.get(relatedName.toLowerCase());
+                if (targetNode != null) {
+                    createEdgeIfNotExists(sourceNode.getId(), targetNode.getId(), EdgeType.RELATED_TO);
+                }
             }
         }
 
@@ -264,6 +293,12 @@ public class PipelineService {
             final KgNode conceptNode;
             if (existing.isPresent()) {
                 conceptNode = existing.get();
+                // P1-4: Update description if the new one is richer
+                if (concept.getDescription() != null && !concept.getDescription().isEmpty()
+                        && (conceptNode.getDescription() == null || conceptNode.getDescription().length() < concept.getDescription().length())) {
+                    conceptNode.setDescription(concept.getDescription());
+                    kgNodeRepo.save(conceptNode);
+                }
                 matched.add(conceptNode);
             } else {
                 conceptNode = kgNodeRepo.save(KgNode.builder()
@@ -276,8 +311,9 @@ public class PipelineService {
                 log.debug("Created KG concept node: {}", concept.getName());
             }
 
+            // P1-5: Use case-insensitive matching for related entities
             for (String relatedName : concept.getRelatedEntities()) {
-                kgNodeRepo.findByNameAndNodeType(relatedName, NodeType.ENTITY).ifPresent(relatedNode -> {
+                kgNodeRepo.findByNameIgnoreCaseAndNodeType(relatedName, NodeType.ENTITY).ifPresent(relatedNode -> {
                     createEdgeIfNotExists(conceptNode.getId(), relatedNode.getId(), EdgeType.RELATED_TO);
                 });
             }
