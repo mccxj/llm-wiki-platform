@@ -22,6 +22,9 @@ import reactor.core.publisher.Mono;
 import java.math.BigDecimal;
 import java.util.*;
 
+import com.llmwiki.adapter.chunking.SlidingWindowChunker;
+import com.llmwiki.adapter.chunking.TextChunk;
+
 @Component
 public class OpenAiApiClient implements AiApiClient {
 
@@ -31,6 +34,7 @@ public class OpenAiApiClient implements AiApiClient {
     private final WebClient webClient;
     private final String model;
     private final AlignmentResolver alignmentResolver;
+    private final SlidingWindowChunker chunker;
 
     private static final String SCORE_SYSTEM_PROMPT_DEFAULT = """
             You are a document quality analyzer. Score the document on these dimensions (0-10 each):
@@ -81,6 +85,7 @@ public class OpenAiApiClient implements AiApiClient {
             AlignmentResolver alignmentResolver) {
         this.model = model;
         this.alignmentResolver = alignmentResolver;
+        this.chunker = new SlidingWindowChunker(8000, 200);
         this.scoreSystemPrompt = scorePrompt.isEmpty() ? SCORE_SYSTEM_PROMPT_DEFAULT : scorePrompt;
         this.entitySystemPrompt = entityPrompt.isEmpty() ? ENTITY_SYSTEM_PROMPT_DEFAULT : entityPrompt;
         this.conceptSystemPrompt = conceptPrompt.isEmpty() ? CONCEPT_SYSTEM_PROMPT_DEFAULT : conceptPrompt;
@@ -135,7 +140,12 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
-            List<String> chunks = splitIntoChunks(content, 7000);
+            // Use sliding window chunking with sentence boundary awareness
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
             int extractionIdx = 0;
@@ -213,7 +223,11 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractConcepts(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(conceptSystemPrompt, examples);
-            List<String> chunks = splitIntoChunks(content, 7000);
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
             ExtractionResult merged = new ExtractionResult();
             List<ConceptInfo> allConcepts = new ArrayList<>();
             int extractionIdx = 0;
@@ -351,31 +365,4 @@ public class OpenAiApiClient implements AiApiClient {
         }
         return list;
     }
-
-    /**
-     * Split text into chunks at paragraph boundaries, each ≤ maxChunkLen chars.
-     * Used for P1-3: avoid truncating long documents.
-     */
-    private List<String> splitIntoChunks(String text, int maxChunkLen) {
-        if (text.length() <= maxChunkLen) return List.of(text);
-        List<String> chunks = new ArrayList<>();
-        // Split on double newline (paragraph boundary)
-        String[] paragraphs = text.split("\\n\\n+");
-        StringBuilder current = new StringBuilder();
-        for (String para : paragraphs) {
-            if (current.length() + para.length() + 2 > maxChunkLen && !current.isEmpty()) {
-                chunks.add(current.toString());
-                current = new StringBuilder();
-            }
-            if (!current.isEmpty()) current.append("\n\n");
-            current.append(para);
-            // If a single paragraph exceeds maxChunkLen, force-split it
-            if (current.length() > maxChunkLen) {
-                chunks.add(current.toString());
-                current = new StringBuilder();
-            }
-        }
-        if (!current.isEmpty()) chunks.add(current.toString());
-        return chunks;
     }
-}
