@@ -10,9 +10,9 @@ import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
+import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
 import com.llmwiki.adapter.resolver.AlignmentResolver;
-import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.common.enums.AlignmentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -199,6 +199,14 @@ public class OpenAiApiClient implements AiApiClient {
                                 node.get("type").asText(),
                                 node.has("description") ? node.get("description").asText() : "",
                                 related);
+
+                        if (node.has("start_offset") && node.has("end_offset")) {
+                            entity.setStartOffset(node.get("start_offset").asInt());
+                            entity.setEndOffset(node.get("end_offset").asInt());
+                            entity.setAlignmentStatus(AlignmentStatus.EXACT);
+                        }
+
+                        entity.setExtractionIndex(extractionIdx++);
                         allEntities.add(entity);
                     }
                 }
@@ -226,7 +234,21 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            merged.setEntities(new ArrayList<>(deduped.values()));
+            List<EntityInfo> finalEntities = new ArrayList<>();
+            for (EntityInfo e : deduped.values()) {
+                if (e.getStartOffset() == null) {
+                    AlignmentResolver.AlignmentResult aligned =
+                            alignmentResolver.alignEntity(e.getName(), content);
+                    if (aligned != null) {
+                        e.setStartOffset(aligned.getStartOffset());
+                        e.setEndOffset(aligned.getEndOffset());
+                        e.setAlignmentStatus(aligned.getStatus());
+                    }
+                }
+                finalEntities.add(e);
+            }
+
+            merged.setEntities(finalEntities);
             merged.setConcepts(Collections.emptyList());
             // E-6: Set relations
             merged.setRelations(allRelations);
@@ -253,6 +275,7 @@ public class OpenAiApiClient implements AiApiClient {
             }
             ExtractionResult merged = new ExtractionResult();
             List<ConceptInfo> allConcepts = new ArrayList<>();
+            int extractionIdx = 0;
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -266,15 +289,34 @@ public class OpenAiApiClient implements AiApiClient {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
                         String name = node.get("name").asText();
+<<<<<<< HEAD
+                        ConceptInfo concept = new ConceptInfo(
+                                name,
+                                node.has("description") ? node.get("description").asText() : "",
+                                related);
+
+                        if (node.has("start_offset") && node.has("end_offset")) {
+                            concept.setStartOffset(node.get("start_offset").asInt());
+                            concept.setEndOffset(node.get("end_offset").asInt());
+                            concept.setAlignmentStatus(AlignmentStatus.EXACT);
+                        }
+
+                        concept.setExtractionIndex(extractionIdx++);
+                        allConcepts.add(concept);
+=======
                         allConcepts.add(new ConceptInfo(
                                 name,
                                 node.has("description") ? node.get("description").asText() : "",
                                 related));
+>>>>>>> origin/master
                     }
                 }
             }
 
+<<<<<<< HEAD
+=======
             // Deduplicate by name
+>>>>>>> origin/master
             Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
             for (ConceptInfo c : allConcepts) {
                 String key = c.getName().toLowerCase();
@@ -283,8 +325,27 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
+<<<<<<< HEAD
+            List<ConceptInfo> finalConcepts = new ArrayList<>();
+            for (ConceptInfo c : deduped.values()) {
+                if (c.getStartOffset() == null) {
+                    AlignmentResolver.AlignmentResult aligned =
+                            alignmentResolver.alignEntity(c.getName(), content);
+                    if (aligned != null) {
+                        c.setStartOffset(aligned.getStartOffset());
+                        c.setEndOffset(aligned.getEndOffset());
+                        c.setAlignmentStatus(aligned.getStatus());
+                    }
+                }
+                finalConcepts.add(c);
+            }
+
+            merged.setEntities(Collections.emptyList());
+            merged.setConcepts(finalConcepts);
+=======
             merged.setEntities(Collections.emptyList());
             merged.setConcepts(new ArrayList<>(deduped.values()));
+>>>>>>> origin/master
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract concepts", e);
@@ -398,10 +459,13 @@ public class OpenAiApiClient implements AiApiClient {
         }
     }
 
+<<<<<<< HEAD
+=======
     /**
      * Build a few-shot prompt from a base system prompt and examples.
      * Falls back to the base prompt when no examples are provided.
      */
+>>>>>>> origin/master
     private String buildFewShotPrompt(String basePrompt, List<ExampleData> examples) {
         if (examples == null || examples.isEmpty()) {
             return basePrompt;

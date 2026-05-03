@@ -17,7 +17,7 @@ class OpenAiApiClientFewShotTest {
 
     @BeforeEach
     void setUp() {
-        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", new AlignmentResolver());
+        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", "", new AlignmentResolver());
     }
 
     @Test

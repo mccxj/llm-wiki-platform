@@ -33,4 +33,5 @@ class EdgeTypeTest {
         assertEquals(EdgeType.IS_A, EdgeType.valueOf("IS_A"));
         assertEquals(EdgeType.CREATED_BY, EdgeType.valueOf("CREATED_BY"));
     }
+    }
 }
