@@ -41,12 +41,15 @@ embedding:
   model: ${EMBEDDING_MODEL:text-embedding-ada-002}
   dimension: 1536
 
+<<<<<<< HEAD
 llm:
   wiki:
     dedup:
       similarity-threshold: 0.85
       warn-threshold: 0.70
 
+=======
+>>>>>>> origin/master
 pipeline:
   thread-pool-size: 4
   retry-max-attempts: 3
