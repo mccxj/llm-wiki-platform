@@ -2,22 +2,16 @@ package com.llmwiki.adapter.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-<<<<<<< HEAD
 import com.llmwiki.adapter.chunking.SlidingWindowChunker;
 import com.llmwiki.adapter.chunking.TextChunk;
-=======
->>>>>>> origin/master
 import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
+import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
 import com.llmwiki.adapter.resolver.AlignmentResolver;
-<<<<<<< HEAD
-=======
-import com.llmwiki.adapter.dto.UnifiedExtractionResult;
->>>>>>> origin/master
 import com.llmwiki.common.enums.AlignmentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,12 +25,6 @@ import reactor.core.publisher.Mono;
 import java.math.BigDecimal;
 import java.util.*;
 
-<<<<<<< HEAD
-=======
-import com.llmwiki.adapter.chunking.SlidingWindowChunker;
-import com.llmwiki.adapter.chunking.TextChunk;
-
->>>>>>> origin/master
 @Component
 public class OpenAiApiClient implements AiApiClient {
 
@@ -83,11 +71,6 @@ public class OpenAiApiClient implements AiApiClient {
             {"concepts":[{"name":"concept_name","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["entity1","entity2"]}]}
             """;
 
-<<<<<<< HEAD
-    private final String scoreSystemPrompt;
-    private final String entitySystemPrompt;
-    private final String conceptSystemPrompt;
-=======
     private static final String UNIFIED_SYSTEM_PROMPT_DEFAULT = """
             Extract the following from the text in a single JSON response:
             1. Named entities (people, organizations, technologies, tools) with type and description.
@@ -106,7 +89,6 @@ public class OpenAiApiClient implements AiApiClient {
     private final String entitySystemPrompt;
     private final String conceptSystemPrompt;
     private final String unifiedSystemPrompt;
->>>>>>> origin/master
 
     public OpenAiApiClient(
             @Value("${ai.api.base-url:http://localhost:8000/v1}") String baseUrl,
@@ -115,10 +97,7 @@ public class OpenAiApiClient implements AiApiClient {
             @Value("${ai.prompt.score:}") String scorePrompt,
             @Value("${ai.prompt.entity:}") String entityPrompt,
             @Value("${ai.prompt.concept:}") String conceptPrompt,
-<<<<<<< HEAD
-=======
             @Value("${ai.prompt.unified:}") String unifiedPrompt,
->>>>>>> origin/master
             AlignmentResolver alignmentResolver) {
         this.model = model;
         this.alignmentResolver = alignmentResolver;
@@ -126,10 +105,7 @@ public class OpenAiApiClient implements AiApiClient {
         this.scoreSystemPrompt = scorePrompt.isEmpty() ? SCORE_SYSTEM_PROMPT_DEFAULT : scorePrompt;
         this.entitySystemPrompt = entityPrompt.isEmpty() ? ENTITY_SYSTEM_PROMPT_DEFAULT : entityPrompt;
         this.conceptSystemPrompt = conceptPrompt.isEmpty() ? CONCEPT_SYSTEM_PROMPT_DEFAULT : conceptPrompt;
-<<<<<<< HEAD
-=======
         this.unifiedSystemPrompt = unifiedPrompt.isEmpty() ? UNIFIED_SYSTEM_PROMPT_DEFAULT : unifiedPrompt;
->>>>>>> origin/master
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
@@ -181,7 +157,6 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
-            // Use sliding window chunking with sentence boundary awareness
             List<TextChunk> textChunks = chunker.chunk(content);
             List<String> chunks = new ArrayList<>();
             for (TextChunk tc : textChunks) {
@@ -209,7 +184,6 @@ public class OpenAiApiClient implements AiApiClient {
                                 node.has("description") ? node.get("description").asText() : "",
                                 related);
 
-                        // Parse character positions from LLM response
                         if (node.has("start_offset") && node.has("end_offset")) {
                             entity.setStartOffset(node.get("start_offset").asInt());
                             entity.setEndOffset(node.get("end_offset").asInt());
@@ -222,7 +196,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Deduplicate by name (keep first occurrence)
             Map<String, EntityInfo> deduped = new LinkedHashMap<>();
             for (EntityInfo e : allEntities) {
                 String key = e.getName().toLowerCase();
@@ -231,7 +204,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Apply alignment resolver for entities without positions
             List<EntityInfo> finalEntities = new ArrayList<>();
             for (EntityInfo e : deduped.values()) {
                 if (e.getStartOffset() == null) {
@@ -290,7 +262,6 @@ public class OpenAiApiClient implements AiApiClient {
                                 node.has("description") ? node.get("description").asText() : "",
                                 related);
 
-                        // Parse character positions from LLM response
                         if (node.has("start_offset") && node.has("end_offset")) {
                             concept.setStartOffset(node.get("start_offset").asInt());
                             concept.setEndOffset(node.get("end_offset").asInt());
@@ -303,7 +274,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Deduplicate by name
             Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
             for (ConceptInfo c : allConcepts) {
                 String key = c.getName().toLowerCase();
@@ -312,7 +282,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Apply alignment resolver for concepts without positions
             List<ConceptInfo> finalConcepts = new ArrayList<>();
             for (ConceptInfo c : deduped.values()) {
                 if (c.getStartOffset() == null) {
@@ -337,8 +306,6 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     @Override
-<<<<<<< HEAD
-=======
     public UnifiedExtractionResult unifiedExtract(String content) {
         try {
             List<String> chunks = splitIntoChunks(content, 7000);
@@ -424,7 +391,6 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     @Override
->>>>>>> origin/master
     public String chat(String systemPrompt, String userMessage) {
         return callApi(systemPrompt, userMessage);
     }
@@ -445,17 +411,12 @@ public class OpenAiApiClient implements AiApiClient {
         }
     }
 
-    /**
-     * Build a few-shot prompt from a base system prompt and examples.
-     * Falls back to the base prompt when no examples are provided.
-     */
     private String buildFewShotPrompt(String basePrompt, List<ExampleData> examples) {
         if (examples == null || examples.isEmpty()) {
             return basePrompt;
         }
         PromptTemplate template = new PromptTemplate(basePrompt, examples);
         String rendered = template.render("{{INPUT}}");
-        // Remove the trailing placeholder since the actual input is sent as the user message
         return rendered.substring(0, rendered.lastIndexOf("Text: {{INPUT}}"));
     }
 
@@ -486,8 +447,6 @@ public class OpenAiApiClient implements AiApiClient {
         return (String) message.get("content");
     }
 
-<<<<<<< HEAD
-=======
     private List<String> splitIntoChunks(String content, int maxChunkSize) {
         List<String> chunks = new ArrayList<>();
         if (content == null || content.isEmpty()) {
@@ -503,7 +462,6 @@ public class OpenAiApiClient implements AiApiClient {
         return chunks;
     }
 
->>>>>>> origin/master
     private List<String> parseStringList(JsonNode root, String field) {
         List<String> list = new ArrayList<>();
         JsonNode arr = root.get(field);
@@ -512,8 +470,4 @@ public class OpenAiApiClient implements AiApiClient {
         }
         return list;
     }
-<<<<<<< HEAD
 }
-=======
-    }
->>>>>>> origin/master

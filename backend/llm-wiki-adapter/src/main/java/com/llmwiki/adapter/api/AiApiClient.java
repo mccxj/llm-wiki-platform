@@ -3,10 +3,7 @@ package com.llmwiki.adapter.api;
 import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ScoreResult;
-<<<<<<< HEAD
-=======
 import com.llmwiki.adapter.dto.UnifiedExtractionResult;
->>>>>>> origin/master
 
 import java.util.List;
 
@@ -41,14 +38,11 @@ public interface AiApiClient {
     ExtractionResult extractConcepts(String content, List<ExampleData> examples);
 
     /**
-<<<<<<< HEAD
-=======
      * Unified extraction: entities, concepts, AND relations in a single LLM call.
      */
     UnifiedExtractionResult unifiedExtract(String content);
 
     /**
->>>>>>> origin/master
      * Chat with the AI model.
      */
     String chat(String systemPrompt, String userMessage);

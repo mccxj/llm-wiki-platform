@@ -23,13 +23,13 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-server:
-  port: 8080
+  server:
+    port: 8080
 
-logging:
-  level:
-    root: INFO
-    com.llmwiki: DEBUG
+  logging:
+    level:
+      root: INFO
+      com.llmwiki: DEBUG
 
 ai:
   api:
@@ -41,15 +41,12 @@ embedding:
   model: ${EMBEDDING_MODEL:text-embedding-ada-002}
   dimension: 1536
 
-<<<<<<< HEAD
 llm:
   wiki:
     dedup:
       similarity-threshold: 0.85
       warn-threshold: 0.70
 
-=======
->>>>>>> origin/master
 pipeline:
   thread-pool-size: 4
   retry-max-attempts: 3
