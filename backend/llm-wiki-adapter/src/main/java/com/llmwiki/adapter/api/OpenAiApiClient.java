@@ -235,7 +235,6 @@ public class OpenAiApiClient implements AiApiClient {
             }
             ExtractionResult merged = new ExtractionResult();
             List<ConceptInfo> allConcepts = new ArrayList<>();
-            int extractionIdx = 0;
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -249,13 +248,10 @@ public class OpenAiApiClient implements AiApiClient {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
                         String name = node.get("name").asText();
-                        ConceptInfo concept = new ConceptInfo(
+                        allConcepts.add(new ConceptInfo(
                                 name,
                                 node.has("description") ? node.get("description").asText() : "",
-                                related);
-
-                        concept.setExtractionIndex(extractionIdx++);
-                        allConcepts.add(concept);
+                                related));
                     }
                 }
             }
