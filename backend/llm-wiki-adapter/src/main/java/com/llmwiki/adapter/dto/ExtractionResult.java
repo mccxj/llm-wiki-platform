@@ -7,6 +7,7 @@ import java.util.List;
 public class ExtractionResult {
     private List<EntityInfo> entities;
     private List<ConceptInfo> concepts;
+    private List<RelationInfo> relations;
 
     public ExtractionResult() {}
 
@@ -14,6 +15,8 @@ public class ExtractionResult {
     public void setEntities(List<EntityInfo> entities) { this.entities = entities; }
     public List<ConceptInfo> getConcepts() { return concepts; }
     public void setConcepts(List<ConceptInfo> concepts) { this.concepts = concepts; }
+    public List<RelationInfo> getRelations() { return relations; }
+    public void setRelations(List<RelationInfo> relations) { this.relations = relations; }
 
     public static class EntityInfo {
         private String name;
