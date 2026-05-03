@@ -8,6 +8,8 @@ import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
+import com.llmwiki.adapter.resolver.AlignmentResolver;
+import com.llmwiki.common.enums.AlignmentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +22,9 @@ import reactor.core.publisher.Mono;
 import java.math.BigDecimal;
 import java.util.*;
 
+import com.llmwiki.adapter.chunking.SlidingWindowChunker;
+import com.llmwiki.adapter.chunking.TextChunk;
+
 @Component
 public class OpenAiApiClient implements AiApiClient {
 
@@ -28,6 +33,8 @@ public class OpenAiApiClient implements AiApiClient {
 
     private final WebClient webClient;
     private final String model;
+    private final AlignmentResolver alignmentResolver;
+    private final SlidingWindowChunker chunker;
 
     private static final String SCORE_SYSTEM_PROMPT_DEFAULT = """
             You are a document quality analyzer. Score the document on these dimensions (0-10 each):
@@ -45,17 +52,23 @@ public class OpenAiApiClient implements AiApiClient {
             Extract named entities from the text. Identify people, organizations, technologies,
             tools, and other important named things. Do NOT include abstract concepts — those are handled separately.
 
+            For each entity, provide the character position (start_offset, end_offset) where the entity
+            appears in the source text. If the entity appears multiple times, use the first occurrence.
+
             Also identify relationships between entities found in the text.
 
             Respond in JSON format:
-            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity_name"]}]}
+            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity_name"]}]}
             """;
 
     private static final String CONCEPT_SYSTEM_PROMPT_DEFAULT = """
             Extract key concepts and themes from the text. A concept is an abstract idea or topic.
 
+            For each concept, provide the character position (start_offset, end_offset) where the concept
+            appears in the source text. If the concept appears multiple times, use the first occurrence.
+
             Respond in JSON format:
-            {"concepts":[{"name":"concept_name","description":"brief description","related_entities":["entity1","entity2"]}]}
+            {"concepts":[{"name":"concept_name","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["entity1","entity2"]}]}
             """;
 
     private final String scoreSystemPrompt;
@@ -68,8 +81,11 @@ public class OpenAiApiClient implements AiApiClient {
             @Value("${ai.model:gpt-4o-mini}") String model,
             @Value("${ai.prompt.score:}") String scorePrompt,
             @Value("${ai.prompt.entity:}") String entityPrompt,
-            @Value("${ai.prompt.concept:}") String conceptPrompt) {
+            @Value("${ai.prompt.concept:}") String conceptPrompt,
+            AlignmentResolver alignmentResolver) {
         this.model = model;
+        this.alignmentResolver = alignmentResolver;
+        this.chunker = new SlidingWindowChunker(8000, 200);
         this.scoreSystemPrompt = scorePrompt.isEmpty() ? SCORE_SYSTEM_PROMPT_DEFAULT : scorePrompt;
         this.entitySystemPrompt = entityPrompt.isEmpty() ? ENTITY_SYSTEM_PROMPT_DEFAULT : entityPrompt;
         this.conceptSystemPrompt = conceptPrompt.isEmpty() ? CONCEPT_SYSTEM_PROMPT_DEFAULT : conceptPrompt;
@@ -124,9 +140,15 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
-            List<String> chunks = splitIntoChunks(content, 7000);
+            // Use sliding window chunking with sentence boundary awareness
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
+            int extractionIdx = 0;
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -139,11 +161,22 @@ public class OpenAiApiClient implements AiApiClient {
                         if (rel != null && rel.isArray()) {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
-                        allEntities.add(new EntityInfo(
-                                node.get("name").asText(),
+                        String name = node.get("name").asText();
+                        EntityInfo entity = new EntityInfo(
+                                name,
                                 node.get("type").asText(),
                                 node.has("description") ? node.get("description").asText() : "",
-                                related));
+                                related);
+
+                        // Parse character positions from LLM response
+                        if (node.has("start_offset") && node.has("end_offset")) {
+                            entity.setStartOffset(node.get("start_offset").asInt());
+                            entity.setEndOffset(node.get("end_offset").asInt());
+                            entity.setAlignmentStatus(AlignmentStatus.EXACT);
+                        }
+
+                        entity.setExtractionIndex(extractionIdx++);
+                        allEntities.add(entity);
                     }
                 }
             }
@@ -156,7 +189,23 @@ public class OpenAiApiClient implements AiApiClient {
                     deduped.put(key, e);
                 }
             }
-            merged.setEntities(new ArrayList<>(deduped.values()));
+
+            // Apply alignment resolver for entities without positions
+            List<EntityInfo> finalEntities = new ArrayList<>();
+            for (EntityInfo e : deduped.values()) {
+                if (e.getStartOffset() == null) {
+                    AlignmentResolver.AlignmentResult aligned =
+                            alignmentResolver.alignEntity(e.getName(), content);
+                    if (aligned != null) {
+                        e.setStartOffset(aligned.getStartOffset());
+                        e.setEndOffset(aligned.getEndOffset());
+                        e.setAlignmentStatus(aligned.getStatus());
+                    }
+                }
+                finalEntities.add(e);
+            }
+
+            merged.setEntities(finalEntities);
             merged.setConcepts(Collections.emptyList());
             return merged;
         } catch (Exception e) {
@@ -174,9 +223,14 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractConcepts(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(conceptSystemPrompt, examples);
-            List<String> chunks = splitIntoChunks(content, 7000);
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
             ExtractionResult merged = new ExtractionResult();
             List<ConceptInfo> allConcepts = new ArrayList<>();
+            int extractionIdx = 0;
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -189,10 +243,21 @@ public class OpenAiApiClient implements AiApiClient {
                         if (rel != null && rel.isArray()) {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
-                        allConcepts.add(new ConceptInfo(
-                                node.get("name").asText(),
+                        String name = node.get("name").asText();
+                        ConceptInfo concept = new ConceptInfo(
+                                name,
                                 node.has("description") ? node.get("description").asText() : "",
-                                related));
+                                related);
+
+                        // Parse character positions from LLM response
+                        if (node.has("start_offset") && node.has("end_offset")) {
+                            concept.setStartOffset(node.get("start_offset").asInt());
+                            concept.setEndOffset(node.get("end_offset").asInt());
+                            concept.setAlignmentStatus(AlignmentStatus.EXACT);
+                        }
+
+                        concept.setExtractionIndex(extractionIdx++);
+                        allConcepts.add(concept);
                     }
                 }
             }
@@ -205,8 +270,24 @@ public class OpenAiApiClient implements AiApiClient {
                     deduped.put(key, c);
                 }
             }
+
+            // Apply alignment resolver for concepts without positions
+            List<ConceptInfo> finalConcepts = new ArrayList<>();
+            for (ConceptInfo c : deduped.values()) {
+                if (c.getStartOffset() == null) {
+                    AlignmentResolver.AlignmentResult aligned =
+                            alignmentResolver.alignEntity(c.getName(), content);
+                    if (aligned != null) {
+                        c.setStartOffset(aligned.getStartOffset());
+                        c.setEndOffset(aligned.getEndOffset());
+                        c.setAlignmentStatus(aligned.getStatus());
+                    }
+                }
+                finalConcepts.add(c);
+            }
+
             merged.setEntities(Collections.emptyList());
-            merged.setConcepts(new ArrayList<>(deduped.values()));
+            merged.setConcepts(finalConcepts);
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract concepts", e);
@@ -217,91 +298,6 @@ public class OpenAiApiClient implements AiApiClient {
     @Override
     public String chat(String systemPrompt, String userMessage) {
         return callApi(systemPrompt, userMessage);
-    }
-
-    @Override
-    public ExtractionResult extractEntitiesWithTemperature(String content, double temperature) {
-        try {
-            List<String> chunks = splitIntoChunks(content, 7000);
-            List<EntityInfo> allEntities = new ArrayList<>();
-
-            for (String chunk : chunks) {
-                String response = callApi(entitySystemPrompt, chunk, temperature);
-                JsonNode root = MAPPER.readTree(response);
-                JsonNode arr = root.get("entities");
-                if (arr != null && arr.isArray()) {
-                    for (JsonNode node : arr) {
-                        List<String> related = new ArrayList<>();
-                        JsonNode rel = node.get("related_entities");
-                        if (rel != null && rel.isArray()) {
-                            for (JsonNode r : rel) related.add(r.asText());
-                        }
-                        allEntities.add(new EntityInfo(
-                                node.get("name").asText(),
-                                node.get("type").asText(),
-                                node.has("description") ? node.get("description").asText() : "",
-                                related));
-                    }
-                }
-            }
-
-            Map<String, EntityInfo> deduped = new LinkedHashMap<>();
-            for (EntityInfo e : allEntities) {
-                String key = e.getName().toLowerCase();
-                if (!deduped.containsKey(key)) {
-                    deduped.put(key, e);
-                }
-            }
-            ExtractionResult merged = new ExtractionResult();
-            merged.setEntities(new ArrayList<>(deduped.values()));
-            merged.setConcepts(Collections.emptyList());
-            return merged;
-        } catch (Exception e) {
-            log.error("Failed to extract entities with temperature {}", temperature, e);
-            return new ExtractionResult();
-        }
-    }
-
-    @Override
-    public ExtractionResult extractConceptsWithTemperature(String content, double temperature) {
-        try {
-            List<String> chunks = splitIntoChunks(content, 7000);
-            List<ConceptInfo> allConcepts = new ArrayList<>();
-
-            for (String chunk : chunks) {
-                String response = callApi(conceptSystemPrompt, chunk, temperature);
-                JsonNode root = MAPPER.readTree(response);
-                JsonNode arr = root.get("concepts");
-                if (arr != null && arr.isArray()) {
-                    for (JsonNode node : arr) {
-                        List<String> related = new ArrayList<>();
-                        JsonNode rel = node.get("related_entities");
-                        if (rel != null && rel.isArray()) {
-                            for (JsonNode r : rel) related.add(r.asText());
-                        }
-                        allConcepts.add(new ConceptInfo(
-                                node.get("name").asText(),
-                                node.has("description") ? node.get("description").asText() : "",
-                                related));
-                    }
-                }
-            }
-
-            Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
-            for (ConceptInfo c : allConcepts) {
-                String key = c.getName().toLowerCase();
-                if (!deduped.containsKey(key)) {
-                    deduped.put(key, c);
-                }
-            }
-            ExtractionResult merged = new ExtractionResult();
-            merged.setEntities(Collections.emptyList());
-            merged.setConcepts(new ArrayList<>(deduped.values()));
-            return merged;
-        } catch (Exception e) {
-            log.error("Failed to extract concepts with temperature {}", temperature, e);
-            return new ExtractionResult();
-        }
     }
 
     @Override
@@ -335,17 +331,40 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     private String callApi(String systemPrompt, String userMessage) {
-        return callApi(systemPrompt, userMessage, 0.1);
-    }
-
-    private String callApi(String systemPrompt, String userMessage, double temperature) {
         Map<String, Object> body = Map.of(
                 "model", model,
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
                         Map.of("role", "user", "content", userMessage)),
-                "temperature", temperature,
+                "temperature", 0.1,
                 "max_tokens", 2000);
+
+        Map<String, Object> response = webClient.post()
+                .uri("/chat/completions")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(Map.class)
+                .timeout(java.time.Duration.ofSeconds(60))
+                .block();
+
+        if (response == null) throw new RuntimeException("Empty response from AI API");
+
+        List<?> choices = (List<?>) response.get("choices");
+        if (choices == null || choices.isEmpty()) throw new RuntimeException("No choices in AI response");
+
+        Map<?, ?> choice = (Map<?, ?>) choices.get(0);
+        Map<?, ?> message = (Map<?, ?>) choice.get("message");
+        return (String) message.get("content");
+    }
+
+    private String callApi(String systemPrompt, String userMessage, double temperature) {
+        Map<String, Object> body = new java.util.HashMap<>(Map.of(
+                "model", model,
+                "messages", List.of(
+                        Map.of("role", "system", "content", systemPrompt),
+                        Map.of("role", "user", "content", userMessage)),
+                "max_tokens", 2000));
+        body.put("temperature", temperature);
 
         Map<String, Object> response = webClient.post()
                 .uri("/chat/completions")
@@ -374,30 +393,92 @@ public class OpenAiApiClient implements AiApiClient {
         return list;
     }
 
-    /**
-     * Split text into chunks at paragraph boundaries, each ≤ maxChunkLen chars.
-     * Used for P1-3: avoid truncating long documents.
-     */
-    private List<String> splitIntoChunks(String text, int maxChunkLen) {
-        if (text.length() <= maxChunkLen) return List.of(text);
-        List<String> chunks = new ArrayList<>();
-        // Split on double newline (paragraph boundary)
-        String[] paragraphs = text.split("\\n\\n+");
-        StringBuilder current = new StringBuilder();
-        for (String para : paragraphs) {
-            if (current.length() + para.length() + 2 > maxChunkLen && !current.isEmpty()) {
-                chunks.add(current.toString());
-                current = new StringBuilder();
+    @Override
+    public ExtractionResult extractEntitiesWithTemperature(String content, double temperature) {
+        try {
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
             }
-            if (!current.isEmpty()) current.append("\n\n");
-            current.append(para);
-            // If a single paragraph exceeds maxChunkLen, force-split it
-            if (current.length() > maxChunkLen) {
-                chunks.add(current.toString());
-                current = new StringBuilder();
+            List<EntityInfo> allEntities = new ArrayList<>();
+            for (String chunk : chunks) {
+                String response = callApi(entitySystemPrompt, chunk, temperature);
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode arr = root.get("entities");
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode node : arr) {
+                        List<String> related = new ArrayList<>();
+                        JsonNode rel = node.get("related_entities");
+                        if (rel != null && rel.isArray()) {
+                            for (JsonNode r : rel) related.add(r.asText());
+                        }
+                        allEntities.add(new EntityInfo(
+                                node.get("name").asText(),
+                                node.get("type").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
+                }
             }
+            Map<String, EntityInfo> deduped = new LinkedHashMap<>();
+            for (EntityInfo e : allEntities) {
+                String key = e.getName().toLowerCase();
+                if (!deduped.containsKey(key)) {
+                    deduped.put(key, e);
+                }
+            }
+            ExtractionResult result = new ExtractionResult();
+            result.setEntities(new ArrayList<>(deduped.values()));
+            result.setConcepts(Collections.emptyList());
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to extract entities with temperature {}", temperature, e);
+            return new ExtractionResult();
         }
-        if (!current.isEmpty()) chunks.add(current.toString());
-        return chunks;
+    }
+
+    @Override
+    public ExtractionResult extractConceptsWithTemperature(String content, double temperature) {
+        try {
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
+            List<ConceptInfo> allConcepts = new ArrayList<>();
+            for (String chunk : chunks) {
+                String response = callApi(conceptSystemPrompt, chunk, temperature);
+                JsonNode root = MAPPER.readTree(response);
+                JsonNode arr = root.get("concepts");
+                if (arr != null && arr.isArray()) {
+                    for (JsonNode node : arr) {
+                        List<String> related = new ArrayList<>();
+                        JsonNode rel = node.get("related_entities");
+                        if (rel != null && rel.isArray()) {
+                            for (JsonNode r : rel) related.add(r.asText());
+                        }
+                        allConcepts.add(new ConceptInfo(
+                                node.get("name").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
+                }
+            }
+            Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
+            for (ConceptInfo c : allConcepts) {
+                String key = c.getName().toLowerCase();
+                if (!deduped.containsKey(key)) {
+                    deduped.put(key, c);
+                }
+            }
+            ExtractionResult result = new ExtractionResult();
+            result.setEntities(Collections.emptyList());
+            result.setConcepts(new ArrayList<>(deduped.values()));
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to extract concepts with temperature {}", temperature, e);
+            return new ExtractionResult();
+        }
     }
 }

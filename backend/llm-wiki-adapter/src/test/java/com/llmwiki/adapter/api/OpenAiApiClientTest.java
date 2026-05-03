@@ -2,6 +2,7 @@ package com.llmwiki.adapter.api;
 
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ScoreResult;
+import com.llmwiki.adapter.resolver.AlignmentResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -12,10 +13,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class OpenAiApiClientTest {
 
     OpenAiApiClient client;
+    AlignmentResolver resolver;
 
     @BeforeEach
     void setUp() {
-        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "");
+        resolver = new AlignmentResolver();
+        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", resolver);
     }
 
     @Test
@@ -68,7 +71,7 @@ class OpenAiApiClientTest {
         String customConcept = "Custom concept prompt";
         OpenAiApiClient customClient = new OpenAiApiClient(
                 "http://localhost:9999", "test-key", "test-model",
-                customScore, customEntity, customConcept);
+                customScore, customEntity, customConcept, resolver);
         assertNotNull(customClient);
         assertTrue(customClient.isAvailable());
     }

@@ -1,5 +1,7 @@
 package com.llmwiki.adapter.dto;
 
+import com.llmwiki.common.enums.AlignmentStatus;
+
 import java.util.List;
 
 public class ExtractionResult {
@@ -18,6 +20,10 @@ public class ExtractionResult {
         private String type;
         private String description;
         private List<String> relatedEntities;
+        private Integer startOffset;
+        private Integer endOffset;
+        private AlignmentStatus alignmentStatus;
+        private Integer extractionIndex;
         private int passCount;
         private double confidence;
 
@@ -36,6 +42,14 @@ public class ExtractionResult {
         public void setDescription(String description) { this.description = description; }
         public List<String> getRelatedEntities() { return relatedEntities; }
         public void setRelatedEntities(List<String> relatedEntities) { this.relatedEntities = relatedEntities; }
+        public Integer getStartOffset() { return startOffset; }
+        public void setStartOffset(Integer startOffset) { this.startOffset = startOffset; }
+        public Integer getEndOffset() { return endOffset; }
+        public void setEndOffset(Integer endOffset) { this.endOffset = endOffset; }
+        public AlignmentStatus getAlignmentStatus() { return alignmentStatus; }
+        public void setAlignmentStatus(AlignmentStatus alignmentStatus) { this.alignmentStatus = alignmentStatus; }
+        public Integer getExtractionIndex() { return extractionIndex; }
+        public void setExtractionIndex(Integer extractionIndex) { this.extractionIndex = extractionIndex; }
         public int getPassCount() { return passCount; }
         public void setPassCount(int passCount) { this.passCount = passCount; }
         public double getConfidence() { return confidence; }
@@ -46,6 +60,10 @@ public class ExtractionResult {
         private String name;
         private String description;
         private List<String> relatedEntities;
+        private Integer startOffset;
+        private Integer endOffset;
+        private AlignmentStatus alignmentStatus;
+        private Integer extractionIndex;
         private int passCount;
         private double confidence;
 
@@ -59,6 +77,14 @@ public class ExtractionResult {
         public void setDescription(String description) { this.description = description; }
         public List<String> getRelatedEntities() { return relatedEntities; }
         public void setRelatedEntities(List<String> relatedEntities) { this.relatedEntities = relatedEntities; }
+        public Integer getStartOffset() { return startOffset; }
+        public void setStartOffset(Integer startOffset) { this.startOffset = startOffset; }
+        public Integer getEndOffset() { return endOffset; }
+        public void setEndOffset(Integer endOffset) { this.endOffset = endOffset; }
+        public AlignmentStatus getAlignmentStatus() { return alignmentStatus; }
+        public void setAlignmentStatus(AlignmentStatus alignmentStatus) { this.alignmentStatus = alignmentStatus; }
+        public Integer getExtractionIndex() { return extractionIndex; }
+        public void setExtractionIndex(Integer extractionIndex) { this.extractionIndex = extractionIndex; }
         public int getPassCount() { return passCount; }
         public void setPassCount(int passCount) { this.passCount = passCount; }
         public double getConfidence() { return confidence; }

@@ -17,12 +17,10 @@ public interface AiApiClient {
     ScoreResult score(String content);
 
     /**
-     * Extract entities from text (single-pass).
-     * This is the low-level method that MultiPassExtractor calls.
+     * Extract entities from text.
      */
     ExtractionResult extractEntities(String content);
 
-    /**
     /**
      * Extract entities from text with few-shot examples.
      */

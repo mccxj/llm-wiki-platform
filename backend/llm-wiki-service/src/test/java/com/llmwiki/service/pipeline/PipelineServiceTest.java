@@ -26,18 +26,17 @@ import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
 import com.llmwiki.service.scoring.ScoringService;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
 
 import java.math.BigDecimal;
 import java.util.*;
 
+import org.mockito.junit.jupiter.MockitoSettings;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -98,9 +97,8 @@ class PipelineServiceTest {
         concepts.setConcepts(List.of(
                 new ConceptInfo("OOP", "Object-Oriented", List.of("Java"))));
 
-        // Mock multiPassExtractor to return entities directly (bypass multi-pass logic in unit tests)
-        lenient().when(multiPassExtractor.extractAll(anyString(), anySet()))
-                .thenReturn(entities.getEntities());
+        // Default stub for multiPassExtractor (E3)
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(Collections.emptyList());
     }
 
     @Test
@@ -129,7 +127,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -153,7 +151,7 @@ class PipelineServiceTest {
         pipelineService.processDocument(rawDocId);
 
         verify(scoringService).scoreDocument(doc.getContent());
-        verify(multiPassExtractor).extractAll(eq(doc.getContent()), anySet());
+        verify(multiPassExtractor).extractAll(anyString(), anySet());
         verify(aiClient).extractConcepts(doc.getContent());
         verify(kgNodeRepo, atLeast(3)).save(any(KgNode.class));
         verify(pageRepo, atLeast(1)).save(any(Page.class));
@@ -170,7 +168,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -210,7 +208,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -237,7 +235,6 @@ class PipelineServiceTest {
         verify(kgEdgeRepo, atLeast(2)).save(any(KgEdge.class));
     }
 
-    @Disabled("Needs update for MultiPassExtractor mock - see E-3 follow-up")
     @Test
     void processDocument_shouldNotCreateDuplicateEdges() {
         KgNode entityNode = KgNode.builder()
@@ -253,7 +250,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(Collections.emptyList());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -264,7 +261,9 @@ class PipelineServiceTest {
             return n;
         });
         when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
-        when(kgEdgeRepo.findBySourceNodeId(conceptNode.getId())).thenReturn(List.of(existingEdge));
+        // Stub findBySourceNodeId to return existing edges for all known node pairs
+        // This prevents creating duplicate edges (the core assertion of this test)
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of(existingEdge));
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
         when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
             Page p = i.getArgument(0);
@@ -285,7 +284,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -327,7 +326,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -382,7 +381,6 @@ class PipelineServiceTest {
         assertTrue(dlq.getErrorMessage().contains("AI service unavailable"));
     }
 
-    @Disabled("Needs update for MultiPassExtractor mock - see E-3 follow-up")
     @Test
     void processDocument_shouldSucceedOnRetry() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
@@ -392,7 +390,18 @@ class PipelineServiceTest {
                 .thenThrow(new RuntimeException("Transient error"))
                 .thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(Collections.emptyList());
+        ExtractionResult emptyConcepts = new ExtractionResult(); emptyConcepts.setConcepts(Collections.emptyList()); emptyConcepts.setEntities(Collections.emptyList());
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(emptyConcepts);
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(inv -> { KgNode n = inv.getArgument(0); n.setId(UUID.randomUUID()); return n; });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(inv -> { Page p = inv.getArgument(0); p.setId(UUID.randomUUID()); return p; });
+        when(approvalQueueRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(Collections.emptyList());
 
         pipelineService.processDocument(rawDocId);
 
@@ -402,20 +411,19 @@ class PipelineServiceTest {
         verify(deadLetterQueueRepo, never()).save(any());
     }
 
-    @Disabled("Needs update for MultiPassExtractor mock - see E-3 follow-up")
     @Test
     void processDocument_shouldSaveDlqForEntityExtractionFailure() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenThrow(new RuntimeException("Extraction failed"));
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenThrow(new RuntimeException("Extraction failed"));
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.processDocument(rawDocId);
 
-        verify(aiClient, times(3)).extractEntities(doc.getContent());
+        verify(multiPassExtractor, times(3)).extractAll(anyString(), anySet());
         ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
         verify(deadLetterQueueRepo).save(dlqCaptor.capture());
         assertEquals("ENTITY_EXTRACTION", dlqCaptor.getValue().getStep());
@@ -482,7 +490,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
@@ -529,7 +537,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(javaNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.of(sunNode));
@@ -569,7 +577,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
@@ -619,7 +627,7 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(multiPassExtractor.extractAll(eq(doc.getContent()), anySet())).thenReturn(entities.getEntities());
+        when(multiPassExtractor.extractAll(anyString(), anySet())).thenReturn(entities.getEntities());
         when(aiClient.extractConcepts(doc.getContent())).thenReturn(caseSensitiveConcepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());

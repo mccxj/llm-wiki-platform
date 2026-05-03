@@ -3,6 +3,7 @@ package com.llmwiki.adapter.api;
 import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExampleData.LabeledExtraction;
 import com.llmwiki.adapter.dto.ExtractionResult;
+import com.llmwiki.adapter.resolver.AlignmentResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -13,10 +14,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class OpenAiApiClientFewShotTest {
 
     OpenAiApiClient client;
+    AlignmentResolver resolver;
 
     @BeforeEach
     void setUp() {
-        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "");
+        resolver = new AlignmentResolver();
+        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", resolver);
     }
 
     @Test
