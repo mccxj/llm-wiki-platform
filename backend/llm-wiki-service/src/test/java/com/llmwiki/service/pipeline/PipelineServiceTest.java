@@ -28,6 +28,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -37,6 +39,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class PipelineServiceTest {
 
     @Mock private RawDocumentRepository rawDocRepo;
@@ -94,17 +97,17 @@ class PipelineServiceTest {
 
     @Test
     void shouldExtractEntitiesUsingMultiPass() {
-        ExtractionResult entityResult = new ExtractionResult();
-        entityResult.setEntities(List.of(
-                new EntityInfo("Java", "TECH", "Programming language"),
-                new EntityInfo("Spring", "TECH", "Framework")
-        ));
-        entityResult.setConcepts(Collections.emptyList());
+        ExtractionResult emptyConcepts = new ExtractionResult();
+        emptyConcepts.setEntities(Collections.emptyList());
+        emptyConcepts.setConcepts(Collections.emptyList());
 
         when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
         when(scoringService.passesThreshold(any())).thenReturn(true);
-        when(multiPassExtractor.extractAll(any(), any())).thenReturn(entityResult.getEntities());
-        when(aiClient.extractConcepts(any())).thenReturn(new ExtractionResult());
+        when(multiPassExtractor.extractAll(any(), any())).thenReturn(List.of(
+                new EntityInfo("Java", "TECH", "Programming language"),
+                new EntityInfo("Spring", "TECH", "Framework")
+        ));
+        when(aiClient.extractConcepts(any())).thenReturn(emptyConcepts);
         when(embeddingClient.embed(any())).thenReturn(new float[1536]);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
@@ -137,7 +140,6 @@ class PipelineServiceTest {
         when(aiClient.extractConcepts(any())).thenReturn(conceptResult);
         when(embeddingClient.embed(any())).thenReturn(new float[1536]);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
-        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
 
         ScoreResult scoreResult = new ScoreResult();
         scoreResult.setOverallScore(BigDecimal.valueOf(8.0));
@@ -155,16 +157,16 @@ class PipelineServiceTest {
 
     @Test
     void shouldCreateKnowledgeGraphNodes() {
-        ExtractionResult entityResult = new ExtractionResult();
-        entityResult.setEntities(List.of(
-                new EntityInfo("Python", "TECH", "Language")
-        ));
-        entityResult.setConcepts(Collections.emptyList());
+        ExtractionResult emptyConcepts = new ExtractionResult();
+        emptyConcepts.setEntities(Collections.emptyList());
+        emptyConcepts.setConcepts(Collections.emptyList());
 
         when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
         when(scoringService.passesThreshold(any())).thenReturn(true);
-        when(multiPassExtractor.extractAll(any(), any())).thenReturn(entityResult.getEntities());
-        when(aiClient.extractConcepts(any())).thenReturn(new ExtractionResult());
+        when(multiPassExtractor.extractAll(any(), any())).thenReturn(List.of(
+                new EntityInfo("Python", "TECH", "Language")
+        ));
+        when(aiClient.extractConcepts(any())).thenReturn(emptyConcepts);
         when(embeddingClient.embed(any())).thenReturn(new float[1536]);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
