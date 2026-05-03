@@ -1,102 +1,62 @@
-# Task: E-2 Few-Shot Prompting Support
+# Task: E-1 Source Grounding — Entity Position Alignment
 
 ## GitHub Issue
-#34 [E-2][P0] Add few-shot prompting support for entity/concept extraction
+#33 [E-1][P0] Add source grounding — align entities to original text positions
 
 ## Problem
-Current extraction uses zero-shot prompting which produces inconsistent quality for domain-specific content. LangExtract uses few-shot examples to improve accuracy by 15-30%.
+Current entity extraction returns only name/type/description with no connection to the original text. Cannot highlight entities in source, verify faithfulness, or provide traceability.
 
 ## LangExtract Reference Architecture
 From LangExtract source code (google/langextract):
-- `langextract/core/data.py`: `ExampleData` dataclass with `text` + `extractions` list
-- `langextract/prompting.py`: `PromptTemplateStructured` with `description` + `examples`
-- `langextract/prompting.py`: `QAPromptGenerator` renders examples into prompt text
-
-Key pattern from LangExtract:
-```
-prompt = description + "\n\n" + formatted_examples + "\n\n" + actual_input
-
-Where formatted_examples looks like:
-"Example 1:
-Text: {example_text}
-Extractions: {example_extractions}
-
-Example 2:
-Text: {example_text}
-Extractions: {example_extractions}"
-```
+- `langextract/core/data.py`: `Extraction` class with `char_interval: CharInterval`, `alignment_status: AlignmentStatus`
+- `langextract/core/tokenizer.py`: `Token`, `CharInterval(start_pos, end_pos)`, `TokenInterval`
+- `langextract/resolver.py`: 3-tier alignment strategy:
+  1. Exact match via `str.find()`
+  2. Fuzzy match via LCS (Longest Common Subsequence) using `difflib.SequenceMatcher`
+  3. Token-level alignment with density threshold (0.75 min, 1/3 density)
+  - `AlignmentStatus`: MATCH_EXACT, MATCH_GREATER, MATCH_LESSER, MATCH_FUZZY
 
 ## Implementation Plan
 
-### 1. Add ExampleData class (llm-wiki-adapter)
-```java
-public class ExampleData {
-    private String text;
-    private List<LabeledExtraction> extractions;
-    
-    public static class LabeledExtraction {
-        private String extractionClass;  // entity class like "PERSON", "ORG"
-        private String extractionText;   // the actual text
-        private String description;
-        private List<String> attributes; // optional
-    }
-}
-```
+### 1. Add common types (llm-wiki-common)
+- `CharInterval` class: startOffset, endOffset
+- `AlignmentStatus` enum: EXACT, FUZZY, GREATER, LESSER
 
-### 2. Add PromptTemplate class (llm-wiki-adapter)
-```java
-public class PromptTemplate {
-    private String description;
-    private List<ExampleData> examples;
-    
-    public String render(String inputText) {
-        // Build prompt: description + examples + input
-    }
-}
-```
+### 2. Update ExtractionResult (llm-wiki-adapter)
+Add to both `EntityInfo` and `ConceptInfo`:
+- `startOffset` (Integer)
+- `endOffset` (Integer)  
+- `alignmentStatus` (AlignmentStatus)
+- `extractionIndex` (Integer)
 
-### 3. Create EntityExample entity + repository (llm-wiki-domain)
-- `EntityExample` JPA entity: id, name, exampleType (ENTITY|CONCEPT), text, extractions (JSON), createdAt
-- `EntityExampleRepository`: findByType(), findAllActive()
+### 3. Update OpenAiApiClient (llm-wiki-adapter)
+- Update entity extraction prompt to request character positions
+- Update concept extraction prompt similarly
+- Implement `alignEntity()` method (3-tier alignment)
+- Implement `alignEntityBatch()` for post-processing
 
-### 4. Update OpenAiApiClient (llm-wiki-adapter)
-- Add `List<ExampleData>` parameter to extractEntities() and extractConcepts()
-- Build few-shot prompt when examples are available
-- Fall back to zero-shot when no examples
+### 4. Implement AlignmentResolver (llm-wiki-adapter, new class)
+- Port LangExtract's resolver logic to Java
+- Exact match: `String.indexOf()`
+- Fuzzy match: Java's equivalent of SequenceMatcher (use Apache Commons Text `SimilarityScore`)
+- Token-level fallback with density check
 
-### 5. Create EntityExampleService (llm-wiki-service)
-- CRUD for example management
-- Load examples from DB, convert to ExampleData
+### 5. Update PipelineService (llm-wiki-service)
+- Pass grounding info through matchKnowledgeGraph()
 
-### 6. DB Migration
-- V8__create_entity_examples.sql
+### 6. Tests
+- AlignmentResolverTest: exact, fuzzy, partial alignment scenarios
+- OpenAiApiClientTest: verify position fields in parsed results
+- PipelineServiceTest: verify grounding info flows through
 
-### 7. REST API (llm-wiki-web)
-- GET /api/examples — list all examples
-- POST /api/examples — create example
-- PUT /api/examples/{id} — update example
-- DELETE /api/examples/{id} — delete example
-
-### 8. Tests
-- PromptTemplateTest: verify prompt rendering
-- EntityExampleServiceTest: CRUD operations
-- OpenAiApiClientTest: verify few-shot prompt structure when examples provided
-- EntityExampleRepositoryTest: DB queries
-
-## Files to Create/Modify
-NEW:
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/ExampleData.java
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/prompting/PromptTemplate.java
-- backend/llm-wiki-domain/src/main/java/com/llmwiki/domain/example/entity/EntityExample.java
-- backend/llm-wiki-domain/src/main/java/com/llmwiki/domain/example/repository/EntityExampleRepository.java
-- backend/llm-wiki-service/src/main/java/com/llmwiki/service/example/EntityExampleService.java
-- backend/llm-wiki-web/src/main/java/com/llmwiki/web/controller/EntityExampleController.java
-- backend/llm-wiki-web/src/main/resources/db/migration/V8__create_entity_examples.sql
-
-MODIFY:
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/AiApiClient.java (add examples param)
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/OpenAiApiClient.java (implement few-shot)
-- backend/llm-wiki-service/src/main/java/com/llmwiki/service/pipeline/PipelineService.java (pass examples)
+## Files to Modify
+- `backend/llm-wiki-common/src/main/java/com/llmwiki/common/types/CharInterval.java` (NEW)
+- `backend/llm-wiki-common/src/main/java/com/llmwiki/common/enums/AlignmentStatus.java` (NEW)
+- `backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/ExtractionResult.java` (MODIFY)
+- `backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/OpenAiApiClient.java` (MODIFY)
+- `backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/resolver/AlignmentResolver.java` (NEW)
+- `backend/llm-wiki-service/src/main/java/com/llmwiki/service/pipeline/PipelineService.java` (MODIFY)
+- Tests for all new/modified classes
 
 ## Development Rules
 - TDD: write tests first, then implement
