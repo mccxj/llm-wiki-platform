@@ -1,6 +1,7 @@
 package com.llmwiki.adapter.api;
 
 import com.llmwiki.adapter.dto.ExtractionResult;
+import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.adapter.resolver.AlignmentResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,7 +19,7 @@ class OpenAiApiClientTest {
     @BeforeEach
     void setUp() {
         resolver = new AlignmentResolver();
-        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", resolver);
+        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", "", resolver);
     }
 
     @Test
@@ -70,8 +71,17 @@ class OpenAiApiClientTest {
         String customConcept = "Custom concept prompt";
         OpenAiApiClient customClient = new OpenAiApiClient(
                 "http://localhost:9999", "test-key", "test-model",
-                customScore, customEntity, customConcept, resolver);
+                customScore, customEntity, customConcept, "", resolver);
         assertNotNull(customClient);
         assertTrue(customClient.isAvailable());
+    }
+
+    @Test
+    void unifiedExtract_shouldReturnEmptyForUnreachableServer() {
+        UnifiedExtractionResult result = client.unifiedExtract("test content");
+        assertNotNull(result);
+        assertTrue(result.getEntities() == null || result.getEntities().isEmpty());
+        assertTrue(result.getConcepts() == null || result.getConcepts().isEmpty());
+        assertTrue(result.getRelations() == null || result.getRelations().isEmpty());
     }
 }
