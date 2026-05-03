@@ -2,6 +2,7 @@ package com.llmwiki.service.pipeline;
 
 import com.llmwiki.adapter.api.AiApiClient;
 import com.llmwiki.adapter.api.EmbeddingClient;
+import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
@@ -29,6 +30,7 @@ import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
 import com.llmwiki.domain.config.repository.SystemConfigRepository;
+import com.llmwiki.service.example.EntityExampleService;
 import com.llmwiki.service.scoring.ScoringService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -61,6 +63,7 @@ public class PipelineService {
     private final AiApiClient aiClient;
     private final EmbeddingClient embeddingClient;
     private final ScoringService scoringService;
+    private final EntityExampleService entityExampleService;
 
     @Transactional
     public void processDocument(UUID rawDocId) {
@@ -242,11 +245,13 @@ public class PipelineService {
     }
 
     private ExtractionResult extractEntities(RawDocument doc) {
-        return aiClient.extractEntities(doc.getContent());
+        List<ExampleData> examples = entityExampleService.loadExamplesAsExampleData(null);
+        return aiClient.extractEntities(doc.getContent(), examples);
     }
 
     private ExtractionResult extractConcepts(RawDocument doc) {
-        return aiClient.extractConcepts(doc.getContent());
+        List<ExampleData> examples = entityExampleService.loadExamplesAsExampleData(null);
+        return aiClient.extractConcepts(doc.getContent(), examples);
     }
 
     private List<KgNode> matchKnowledgeGraph(ExtractionResult entities, ExtractionResult concepts) {
