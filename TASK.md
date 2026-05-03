@@ -29,4 +29,3 @@ Single-pass extraction misses entities in long documents. LangExtract uses extra
 ## Files to Modify
 - backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/OpenAiApiClient.java
 - backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/ExtractionResult.java (add confidence field)
-- backend/llm-wiki-service/src/main/java/com/llmwiki/service/pipeline/PipelineService.java

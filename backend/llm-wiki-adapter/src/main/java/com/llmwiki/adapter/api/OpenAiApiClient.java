@@ -9,6 +9,7 @@ import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
 import com.llmwiki.adapter.resolver.AlignmentResolver;
+import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.common.enums.AlignmentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,9 +72,24 @@ public class OpenAiApiClient implements AiApiClient {
             {"concepts":[{"name":"concept_name","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["entity1","entity2"]}]}
             """;
 
+    private static final String UNIFIED_SYSTEM_PROMPT_DEFAULT = """
+            Extract the following from the text in a single JSON response:
+            1. Named entities (people, organizations, technologies, tools) with type and description.
+            2. Key concepts (abstract ideas or topics) with description.
+            3. Relations between entities: how entities relate to each other.
+
+            Respond in JSON format:
+            {
+              "entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity"]}],
+              "concepts":[{"name":"concept_name","description":"brief description","related_entities":["entity1"]}],
+              "relations":[{"source_entity":"EntityA","target_entity":"EntityB","relation_type":"USES|PART_OF|RELATED_TO|LOCATED_IN","confidence":0.95}]
+            }
+            """;
+
     private final String scoreSystemPrompt;
     private final String entitySystemPrompt;
     private final String conceptSystemPrompt;
+    private final String unifiedSystemPrompt;
 
     public OpenAiApiClient(
             @Value("${ai.api.base-url:http://localhost:8000/v1}") String baseUrl,
@@ -82,6 +98,7 @@ public class OpenAiApiClient implements AiApiClient {
             @Value("${ai.prompt.score:}") String scorePrompt,
             @Value("${ai.prompt.entity:}") String entityPrompt,
             @Value("${ai.prompt.concept:}") String conceptPrompt,
+            @Value("${ai.prompt.unified:}") String unifiedPrompt,
             AlignmentResolver alignmentResolver) {
         this.model = model;
         this.alignmentResolver = alignmentResolver;
@@ -89,6 +106,7 @@ public class OpenAiApiClient implements AiApiClient {
         this.scoreSystemPrompt = scorePrompt.isEmpty() ? SCORE_SYSTEM_PROMPT_DEFAULT : scorePrompt;
         this.entitySystemPrompt = entityPrompt.isEmpty() ? ENTITY_SYSTEM_PROMPT_DEFAULT : entityPrompt;
         this.conceptSystemPrompt = conceptPrompt.isEmpty() ? CONCEPT_SYSTEM_PROMPT_DEFAULT : conceptPrompt;
+        this.unifiedSystemPrompt = unifiedPrompt.isEmpty() ? UNIFIED_SYSTEM_PROMPT_DEFAULT : unifiedPrompt;
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey)
@@ -296,6 +314,91 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     @Override
+    public UnifiedExtractionResult unifiedExtract(String content) {
+        try {
+            List<String> chunks = splitIntoChunks(content, 7000);
+            List<UnifiedExtractionResult.EntityInfo> allEntities = new ArrayList<>();
+            List<UnifiedExtractionResult.ConceptInfo> allConcepts = new ArrayList<>();
+            List<UnifiedExtractionResult.RelationInfo> allRelations = new ArrayList<>();
+
+            for (String chunk : chunks) {
+                String response = callApi(unifiedSystemPrompt, chunk);
+                JsonNode root = MAPPER.readTree(response);
+
+                JsonNode entitiesNode = root.get("entities");
+                if (entitiesNode != null && entitiesNode.isArray()) {
+                    for (JsonNode node : entitiesNode) {
+                        List<String> related = parseStringListFromNode(node, "related_entities");
+                        allEntities.add(new UnifiedExtractionResult.EntityInfo(
+                                node.get("name").asText(),
+                                node.get("type").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
+                }
+
+                JsonNode conceptsNode = root.get("concepts");
+                if (conceptsNode != null && conceptsNode.isArray()) {
+                    for (JsonNode node : conceptsNode) {
+                        List<String> related = parseStringListFromNode(node, "related_entities");
+                        allConcepts.add(new UnifiedExtractionResult.ConceptInfo(
+                                node.get("name").asText(),
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+                    }
+                }
+
+                JsonNode relationsNode = root.get("relations");
+                if (relationsNode != null && relationsNode.isArray()) {
+                    for (JsonNode node : relationsNode) {
+                        Double confidence = node.has("confidence") && !node.get("confidence").isNull()
+                                ? node.get("confidence").asDouble() : null;
+                        allRelations.add(new UnifiedExtractionResult.RelationInfo(
+                                node.get("source_entity").asText(),
+                                node.get("target_entity").asText(),
+                                node.get("relation_type").asText(),
+                                confidence));
+                    }
+                }
+            }
+
+            Map<String, UnifiedExtractionResult.EntityInfo> dedupedEntities = new LinkedHashMap<>();
+            for (UnifiedExtractionResult.EntityInfo e : allEntities) {
+                String key = e.getName().toLowerCase();
+                if (!dedupedEntities.containsKey(key)) dedupedEntities.put(key, e);
+            }
+
+            Map<String, UnifiedExtractionResult.ConceptInfo> dedupedConcepts = new LinkedHashMap<>();
+            for (UnifiedExtractionResult.ConceptInfo c : allConcepts) {
+                String key = c.getName().toLowerCase();
+                if (!dedupedConcepts.containsKey(key)) dedupedConcepts.put(key, c);
+            }
+
+            UnifiedExtractionResult result = new UnifiedExtractionResult();
+            result.setEntities(new ArrayList<>(dedupedEntities.values()));
+            result.setConcepts(new ArrayList<>(dedupedConcepts.values()));
+            result.setRelations(allRelations);
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to perform unified extraction", e);
+            UnifiedExtractionResult fallback = new UnifiedExtractionResult();
+            fallback.setEntities(new ArrayList<>());
+            fallback.setConcepts(new ArrayList<>());
+            fallback.setRelations(new ArrayList<>());
+            return fallback;
+        }
+    }
+
+    private List<String> parseStringListFromNode(JsonNode node, String field) {
+        List<String> list = new ArrayList<>();
+        JsonNode arr = node.get(field);
+        if (arr != null && arr.isArray()) {
+            for (JsonNode n : arr) list.add(n.asText());
+        }
+        return list;
+    }
+
+    @Override
     public String chat(String systemPrompt, String userMessage) {
         return callApi(systemPrompt, userMessage);
     }
@@ -382,6 +485,21 @@ public class OpenAiApiClient implements AiApiClient {
         Map<?, ?> choice = (Map<?, ?>) choices.get(0);
         Map<?, ?> message = (Map<?, ?>) choice.get("message");
         return (String) message.get("content");
+    }
+
+    private List<String> splitIntoChunks(String content, int maxChunkSize) {
+        List<String> chunks = new ArrayList<>();
+        if (content == null || content.isEmpty()) {
+            chunks.add("");
+            return chunks;
+        }
+        int start = 0;
+        while (start < content.length()) {
+            int end = Math.min(start + maxChunkSize, content.length());
+            chunks.add(content.substring(start, end));
+            start = end;
+        }
+        return chunks;
     }
 
     private List<String> parseStringList(JsonNode root, String field) {
