@@ -72,7 +72,7 @@ public class PipelineService {
         // Step 1: Score
         ScoreResult scoreResult = executeWithRetry(rawDocId, "SCORE", () -> scoreDocument(doc));
         if (scoreResult == null) {
-            return; // already in DLQ
+            return;
         }
         if (!scoringService.passesThreshold(scoreResult)) {
             BigDecimal threshold = scoringService.getThreshold();
@@ -128,9 +128,6 @@ public class PipelineService {
         log.info("Pipeline completed for document: {}", doc.getId());
     }
 
-    /**
-     * Execute a pipeline step with retry. Returns null if all retries exhausted and saved to DLQ.
-     */
     @SuppressWarnings("unchecked")
     private <T> T executeWithRetry(UUID rawDocId, String stepName, PipelineStep<T> step) {
         int maxRetries = getMaxRetries();
@@ -149,7 +146,6 @@ public class PipelineService {
                         stepName, attempt, maxRetries, rawDocId, e.getMessage());
 
                 if (attempt < maxRetries) {
-                    // Exponential backoff: 1s, 2s, 4s...
                     long backoffMs = (long) Math.pow(2, attempt - 1) * 1000;
                     try {
                         Thread.sleep(backoffMs);
@@ -161,7 +157,6 @@ public class PipelineService {
             }
         }
 
-        // All retries exhausted — save to DLQ
         String errorMsg = lastException != null ? lastException.getMessage() : "Unknown error";
         log.error("Step {} failed after {} retries for document {}, saving to DLQ", stepName, maxRetries, rawDocId);
         saveToDeadLetterQueue(rawDocId, stepName, errorMsg, maxRetries);
@@ -193,9 +188,6 @@ public class PipelineService {
                 .orElse(DEFAULT_MAX_RETRIES);
     }
 
-    /**
-     * Retry a dead letter entry by raw document ID.
-     */
     @Transactional
     public void retryDeadLetter(UUID deadLetterId) {
         DeadLetterQueue dlq = deadLetterQueueRepo.findById(deadLetterId)
@@ -207,7 +199,6 @@ public class PipelineService {
 
         log.info("Retrying dead letter {} for document {} step {}", deadLetterId, dlq.getRawDocumentId(), dlq.getStep());
 
-        // Reset status and increment retry count
         dlq.setStatus("RETRYING");
         dlq.setRetryCount(dlq.getRetryCount() + 1);
         deadLetterQueueRepo.save(dlq);
@@ -251,18 +242,15 @@ public class PipelineService {
 
     private List<KgNode> matchKnowledgeGraph(ExtractionResult entities, ExtractionResult concepts) {
         List<KgNode> matched = new ArrayList<>();
-        // Build a name→node map for all entities in this document (for entity-entity edge creation)
         Map<String, KgNode> entityNodeMap = new LinkedHashMap<>();
 
         for (EntityInfo entity : entities.getEntities()) {
             Optional<KgNode> existing = kgNodeRepo.findByNameAndNodeType(entity.getName(), NodeType.ENTITY);
             if (existing.isPresent()) {
                 KgNode node = existing.get();
-                // P1-4: Update description if the new one is richer
                 if (entity.getDescription() != null && !entity.getDescription().isEmpty()
                         && (node.getDescription() == null || node.getDescription().length() < entity.getDescription().length())) {
                     node.setDescription(entity.getDescription());
-                    // Also update sub-type if previously null
                     if (node.getEntitySubType() == null && entity.getType() != null) {
                         node.setEntitySubType(entity.getType());
                     }
@@ -284,7 +272,6 @@ public class PipelineService {
             }
         }
 
-        // P0-2: Create entity-entity edges from entity relations
         for (EntityInfo entity : entities.getEntities()) {
             KgNode sourceNode = entityNodeMap.get(entity.getName().toLowerCase());
             if (sourceNode == null) continue;
@@ -315,7 +302,6 @@ public class PipelineService {
             final KgNode conceptNode;
             if (existing.isPresent()) {
                 conceptNode = existing.get();
-                // P1-4: Update description if the new one is richer
                 if (concept.getDescription() != null && !concept.getDescription().isEmpty()
                         && (conceptNode.getDescription() == null || conceptNode.getDescription().length() < concept.getDescription().length())) {
                     conceptNode.setDescription(concept.getDescription());
@@ -333,7 +319,6 @@ public class PipelineService {
                 log.debug("Created KG concept node: {}", concept.getName());
             }
 
-            // P1-5: Use case-insensitive matching for related entities
             for (String relatedName : concept.getRelatedEntities()) {
                 kgNodeRepo.findByNameIgnoreCaseAndNodeType(relatedName, NodeType.ENTITY).ifPresent(relatedNode -> {
                     createEdgeIfNotExists(conceptNode.getId(), relatedNode.getId(), EdgeType.RELATED_TO);
@@ -358,9 +343,6 @@ public class PipelineService {
         }
     }
 
-    /**
-     * 创建 COMPARISON 节点：当2+实体共享同一类型时，自动生成比较节点
-     */
     private Integer createComparisonNodes(ExtractionResult entities) {
         int count = 0;
         java.util.Map<String, java.util.List<ExtractionResult.EntityInfo>> byType = new java.util.LinkedHashMap<>();
@@ -383,7 +365,6 @@ public class PipelineService {
                             .description("Auto-generated comparison of " + entry.getKey() + " entities")
                             .build());
                     embedAndSave(compNode);
-                    // Link comparison node to all entities in the group
                     for (var entity : entry.getValue()) {
                         kgNodeRepo.findByNameAndNodeType(entity.getName(), NodeType.ENTITY).ifPresent(entNode -> {
                             createEdgeIfNotExists(compNode.getId(), entNode.getId(), EdgeType.RELATED_TO);
@@ -396,9 +377,6 @@ public class PipelineService {
         return count;
     }
 
-    /**
-     * 创建 QUERY 节点：从内容中提取问题句（包含? 或以 What/How/Why 开头）
-     */
     private Integer createQueryNodes(RawDocument doc) {
         int count = 0;
         if (doc.getContent() == null) return count;
@@ -428,7 +406,6 @@ public class PipelineService {
     }
 
     private void createEdgeIfNotExists(UUID sourceId, UUID targetId, EdgeType type, double confidence) {
-        // Check if edge already exists to avoid duplicates
         List<KgEdge> existing = kgEdgeRepo.findBySourceNodeId(sourceId);
         boolean alreadyExists = existing.stream()
                 .anyMatch(e -> e.getTargetNodeId().equals(targetId) && e.getEdgeType() == type);
@@ -504,7 +481,6 @@ public class PipelineService {
             pageTagRepo.save(PageTag.builder().pageId(page.getId()).tag(tag).build());
         }
 
-        // Generate document-level vector embedding
         embedPageContent(page);
 
         return page;
@@ -513,7 +489,6 @@ public class PipelineService {
     private void embedPageContent(Page page) {
         try {
             float[] embedding = embeddingClient.embed(page.getContent());
-            // Store as JSON array string for H2 compatibility
             StringBuilder sb = new StringBuilder("[");
             for (int i = 0; i < embedding.length; i++) {
                 if (i > 0) sb.append(",");
@@ -536,7 +511,6 @@ public class PipelineService {
         if (base.length() > 100) base = base.substring(0, 100);
         if (base.isEmpty()) base = "page";
 
-        // Ensure uniqueness
         String slug = base;
         int suffix = 1;
         while (pageRepo.findBySlug(slug).isPresent()) {
@@ -550,7 +524,6 @@ public class PipelineService {
         int count = 0;
         for (KgNode kgNode : relatedNodes) {
             if (kgNode.getPageId() != null && !kgNode.getPageId().equals(page.getId())) {
-                // Avoid duplicate links
                 List<PageLink> existingLinks = pageLinkRepo.findBySourcePageId(page.getId());
                 boolean alreadyLinked = existingLinks.stream()
                         .anyMatch(l -> l.getTargetPageId().equals(kgNode.getPageId()));
@@ -571,24 +544,20 @@ public class PipelineService {
         List<String> issues = new ArrayList<>();
         int linkedPagesCount = 0;
 
-        // 1. Check title
         if (page.getTitle() == null || page.getTitle().isEmpty()) {
             issues.add("Page title is empty");
         }
 
-        // 2. Check content length
         if (page.getContent() == null || page.getContent().length() < 50) {
             issues.add("Page content is too short (minimum 50 chars)");
         }
 
-        // 3. Check slug is URL-safe
         if (page.getSlug() == null || page.getSlug().isEmpty()) {
             issues.add("Page slug is empty");
         } else if (!page.getSlug().matches("[a-z0-9-]+")) {
             issues.add("Page slug contains invalid characters: " + page.getSlug());
         }
 
-        // 4. Check all entity names appear in page content
         int entityCount = entities.getEntities().size();
         if (page.getContent() != null && entities.getEntities() != null) {
             for (var entity : entities.getEntities()) {
@@ -598,7 +567,6 @@ public class PipelineService {
             }
         }
 
-        // 5. Check linked page IDs exist (no dangling links)
         List<PageLink> links = pageLinkRepo.findBySourcePageId(page.getId());
         for (PageLink link : links) {
             if (!pageRepo.existsById(link.getTargetPageId())) {
@@ -626,9 +594,6 @@ public class PipelineService {
                 .build());
     }
 
-    /**
-     * Functional interface for pipeline steps that can throw exceptions.
-     */
     @FunctionalInterface
     private interface PipelineStep<T> {
         T execute() throws Exception;

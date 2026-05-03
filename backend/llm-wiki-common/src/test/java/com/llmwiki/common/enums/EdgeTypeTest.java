@@ -7,14 +7,12 @@ class EdgeTypeTest {
 
     @Test
     void shouldHaveAllRequiredTypes() {
-        // Original types
         assertNotNull(EdgeType.RELATED_TO);
         assertNotNull(EdgeType.PART_OF);
         assertNotNull(EdgeType.DERIVED_FROM);
         assertNotNull(EdgeType.CONTRADICTS);
         assertNotNull(EdgeType.SUPERSEDES);
         assertNotNull(EdgeType.MENTIONS);
-        // E-6: New structured relation types
         assertNotNull(EdgeType.DEPENDS_ON);
         assertNotNull(EdgeType.IS_A);
         assertNotNull(EdgeType.CREATED_BY);

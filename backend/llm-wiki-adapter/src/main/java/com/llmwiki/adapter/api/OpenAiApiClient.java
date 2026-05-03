@@ -2,6 +2,8 @@ package com.llmwiki.adapter.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.llmwiki.adapter.chunking.SlidingWindowChunker;
+import com.llmwiki.adapter.chunking.TextChunk;
 import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
@@ -9,6 +11,8 @@ import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
+import com.llmwiki.adapter.resolver.AlignmentResolver;
+import com.llmwiki.common.enums.AlignmentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,6 +33,8 @@ public class OpenAiApiClient implements AiApiClient {
 
     private final WebClient webClient;
     private final String model;
+    private final AlignmentResolver alignmentResolver;
+    private final SlidingWindowChunker chunker;
 
     private static final String SCORE_SYSTEM_PROMPT_DEFAULT = """
             You are a document quality analyzer. Score the document on these dimensions (0-10 each):
@@ -46,6 +52,9 @@ public class OpenAiApiClient implements AiApiClient {
             Extract named entities from the text. Identify people, organizations, technologies,
             tools, and other important named things. Do NOT include abstract concepts — those are handled separately.
 
+            For each entity, provide the character position (start_offset, end_offset) where the entity
+            appears in the source text. If the entity appears multiple times, use the first occurrence.
+
             Also extract structured relationships between entities. Use these relation types:
             - DEPENDS_ON: A depends on B (e.g., "Spring depends on Java")
             - IS_A: A is a type of B (e.g., "Java is a programming language")
@@ -62,14 +71,17 @@ public class OpenAiApiClient implements AiApiClient {
             Only include relations with confidence >= 0.5.
 
             Respond in JSON format:
-            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity_name"]}],"relations":[{"source":"entity_name","target":"entity_name","type":"RELATION_TYPE","confidence":0.95}]}
+            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity_name"]}],"relations":[{"source":"entity_name","target":"entity_name","type":"RELATION_TYPE","confidence":0.95}]}
             """;
 
     private static final String CONCEPT_SYSTEM_PROMPT_DEFAULT = """
             Extract key concepts and themes from the text. A concept is an abstract idea or topic.
 
+            For each concept, provide the character position (start_offset, end_offset) where the concept
+            appears in the source text. If the concept appears multiple times, use the first occurrence.
+
             Respond in JSON format:
-            {"concepts":[{"name":"concept_name","description":"brief description","related_entities":["entity1","entity2"]}]}
+            {"concepts":[{"name":"concept_name","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["entity1","entity2"]}]}
             """;
 
     private final String scoreSystemPrompt;
@@ -82,8 +94,11 @@ public class OpenAiApiClient implements AiApiClient {
             @Value("${ai.model:gpt-4o-mini}") String model,
             @Value("${ai.prompt.score:}") String scorePrompt,
             @Value("${ai.prompt.entity:}") String entityPrompt,
-            @Value("${ai.prompt.concept:}") String conceptPrompt) {
+            @Value("${ai.prompt.concept:}") String conceptPrompt,
+            AlignmentResolver alignmentResolver) {
         this.model = model;
+        this.alignmentResolver = alignmentResolver;
+        this.chunker = new SlidingWindowChunker(8000, 200);
         this.scoreSystemPrompt = scorePrompt.isEmpty() ? SCORE_SYSTEM_PROMPT_DEFAULT : scorePrompt;
         this.entitySystemPrompt = entityPrompt.isEmpty() ? ENTITY_SYSTEM_PROMPT_DEFAULT : entityPrompt;
         this.conceptSystemPrompt = conceptPrompt.isEmpty() ? CONCEPT_SYSTEM_PROMPT_DEFAULT : conceptPrompt;
@@ -138,10 +153,16 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
-            List<String> chunks = splitIntoChunks(content, 7000);
+            // Use sliding window chunking with sentence boundary awareness
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
             List<RelationInfo> allRelations = new ArrayList<>();
+            int extractionIdx = 0;
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -154,11 +175,13 @@ public class OpenAiApiClient implements AiApiClient {
                         if (rel != null && rel.isArray()) {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
-                        allEntities.add(new EntityInfo(
-                                node.get("name").asText(),
+                        String name = node.get("name").asText();
+                        EntityInfo entity = new EntityInfo(
+                                name,
                                 node.get("type").asText(),
                                 node.has("description") ? node.get("description").asText() : "",
-                                related));
+                                related);
+                        allEntities.add(entity);
                     }
                 }
                 // E-6: Parse structured relations
@@ -184,6 +207,7 @@ public class OpenAiApiClient implements AiApiClient {
                     deduped.put(key, e);
                 }
             }
+
             merged.setEntities(new ArrayList<>(deduped.values()));
             merged.setConcepts(Collections.emptyList());
             // E-6: Set relations
@@ -204,9 +228,14 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractConcepts(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(conceptSystemPrompt, examples);
-            List<String> chunks = splitIntoChunks(content, 7000);
+            List<TextChunk> textChunks = chunker.chunk(content);
+            List<String> chunks = new ArrayList<>();
+            for (TextChunk tc : textChunks) {
+                chunks.add(tc.getText());
+            }
             ExtractionResult merged = new ExtractionResult();
             List<ConceptInfo> allConcepts = new ArrayList<>();
+            int extractionIdx = 0;
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -219,10 +248,14 @@ public class OpenAiApiClient implements AiApiClient {
                         if (rel != null && rel.isArray()) {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
-                        allConcepts.add(new ConceptInfo(
-                                node.get("name").asText(),
+                        String name = node.get("name").asText();
+                        ConceptInfo concept = new ConceptInfo(
+                                name,
                                 node.has("description") ? node.get("description").asText() : "",
-                                related));
+                                related);
+
+                        concept.setExtractionIndex(extractionIdx++);
+                        allConcepts.add(concept);
                     }
                 }
             }
@@ -235,6 +268,7 @@ public class OpenAiApiClient implements AiApiClient {
                     deduped.put(key, c);
                 }
             }
+
             merged.setEntities(Collections.emptyList());
             merged.setConcepts(new ArrayList<>(deduped.values()));
             return merged;
@@ -275,7 +309,6 @@ public class OpenAiApiClient implements AiApiClient {
         }
         PromptTemplate template = new PromptTemplate(basePrompt, examples);
         String rendered = template.render("{{INPUT}}");
-        // Remove the trailing placeholder since the actual input is sent as the user message
         return rendered.substring(0, rendered.lastIndexOf("Text: {{INPUT}}"));
     }
 
@@ -313,32 +346,5 @@ public class OpenAiApiClient implements AiApiClient {
             for (JsonNode n : arr) list.add(n.asText());
         }
         return list;
-    }
-
-    /**
-     * Split text into chunks at paragraph boundaries, each ≤ maxChunkLen chars.
-     * Used for P1-3: avoid truncating long documents.
-     */
-    private List<String> splitIntoChunks(String text, int maxChunkLen) {
-        if (text.length() <= maxChunkLen) return List.of(text);
-        List<String> chunks = new ArrayList<>();
-        // Split on double newline (paragraph boundary)
-        String[] paragraphs = text.split("\\n\\n+");
-        StringBuilder current = new StringBuilder();
-        for (String para : paragraphs) {
-            if (current.length() + para.length() + 2 > maxChunkLen && !current.isEmpty()) {
-                chunks.add(current.toString());
-                current = new StringBuilder();
-            }
-            if (!current.isEmpty()) current.append("\n\n");
-            current.append(para);
-            // If a single paragraph exceeds maxChunkLen, force-split it
-            if (current.length() > maxChunkLen) {
-                chunks.add(current.toString());
-                current = new StringBuilder();
-            }
-        }
-        if (!current.isEmpty()) chunks.add(current.toString());
-        return chunks;
     }
 }
