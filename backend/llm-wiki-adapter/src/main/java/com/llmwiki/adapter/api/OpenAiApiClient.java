@@ -2,10 +2,12 @@ package com.llmwiki.adapter.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
+import com.llmwiki.adapter.prompting.PromptTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -115,14 +117,19 @@ public class OpenAiApiClient implements AiApiClient {
 
     @Override
     public ExtractionResult extractEntities(String content) {
+        return extractEntities(content, null);
+    }
+
+    @Override
+    public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
-            // P1-3: Split long documents into chunks to avoid truncation
+            String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
             List<String> chunks = splitIntoChunks(content, 7000);
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
 
             for (String chunk : chunks) {
-                String response = callApi(entitySystemPrompt, chunk);
+                String response = callApi(systemPrompt, chunk);
                 JsonNode root = MAPPER.readTree(response);
                 JsonNode arr = root.get("entities");
                 if (arr != null && arr.isArray()) {
@@ -160,14 +167,19 @@ public class OpenAiApiClient implements AiApiClient {
 
     @Override
     public ExtractionResult extractConcepts(String content) {
+        return extractConcepts(content, null);
+    }
+
+    @Override
+    public ExtractionResult extractConcepts(String content, List<ExampleData> examples) {
         try {
-            // P1-3: Split long documents into chunks
+            String systemPrompt = buildFewShotPrompt(conceptSystemPrompt, examples);
             List<String> chunks = splitIntoChunks(content, 7000);
             ExtractionResult merged = new ExtractionResult();
             List<ConceptInfo> allConcepts = new ArrayList<>();
 
             for (String chunk : chunks) {
-                String response = callApi(conceptSystemPrompt, chunk);
+                String response = callApi(systemPrompt, chunk);
                 JsonNode root = MAPPER.readTree(response);
                 JsonNode arr = root.get("concepts");
                 if (arr != null && arr.isArray()) {
@@ -223,6 +235,20 @@ public class OpenAiApiClient implements AiApiClient {
         }
     }
 
+    /**
+     * Build a few-shot prompt from a base system prompt and examples.
+     * Falls back to the base prompt when no examples are provided.
+     */
+    private String buildFewShotPrompt(String basePrompt, List<ExampleData> examples) {
+        if (examples == null || examples.isEmpty()) {
+            return basePrompt;
+        }
+        PromptTemplate template = new PromptTemplate(basePrompt, examples);
+        String rendered = template.render("{{INPUT}}");
+        // Remove the trailing placeholder since the actual input is sent as the user message
+        return rendered.substring(0, rendered.lastIndexOf("Text: {{INPUT}}"));
+    }
+
     private String callApi(String systemPrompt, String userMessage) {
         Map<String, Object> body = Map.of(
                 "model", model,
@@ -260,7 +286,7 @@ public class OpenAiApiClient implements AiApiClient {
     }
 
     /**
-     * Split text into chunks at paragraph boundaries, each不超过 maxChunkLen chars.
+     * Split text into chunks at paragraph boundaries, each ≤ maxChunkLen chars.
      * Used for P1-3: avoid truncating long documents.
      */
     private List<String> splitIntoChunks(String text, int maxChunkLen) {
