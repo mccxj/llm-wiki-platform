@@ -289,7 +289,6 @@ public class OpenAiApiClient implements AiApiClient {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
                         String name = node.get("name").asText();
-<<<<<<< HEAD
                         ConceptInfo concept = new ConceptInfo(
                                 name,
                                 node.has("description") ? node.get("description").asText() : "",
@@ -303,20 +302,11 @@ public class OpenAiApiClient implements AiApiClient {
 
                         concept.setExtractionIndex(extractionIdx++);
                         allConcepts.add(concept);
-=======
-                        allConcepts.add(new ConceptInfo(
-                                name,
-                                node.has("description") ? node.get("description").asText() : "",
-                                related));
->>>>>>> origin/master
                     }
                 }
             }
 
-<<<<<<< HEAD
-=======
             // Deduplicate by name
->>>>>>> origin/master
             Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
             for (ConceptInfo c : allConcepts) {
                 String key = c.getName().toLowerCase();
@@ -325,7 +315,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-<<<<<<< HEAD
             List<ConceptInfo> finalConcepts = new ArrayList<>();
             for (ConceptInfo c : deduped.values()) {
                 if (c.getStartOffset() == null) {
@@ -342,10 +331,6 @@ public class OpenAiApiClient implements AiApiClient {
 
             merged.setEntities(Collections.emptyList());
             merged.setConcepts(finalConcepts);
-=======
-            merged.setEntities(Collections.emptyList());
-            merged.setConcepts(new ArrayList<>(deduped.values()));
->>>>>>> origin/master
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract concepts", e);
@@ -459,13 +444,10 @@ public class OpenAiApiClient implements AiApiClient {
         }
     }
 
-<<<<<<< HEAD
-=======
     /**
      * Build a few-shot prompt from a base system prompt and examples.
      * Falls back to the base prompt when no examples are provided.
      */
->>>>>>> origin/master
     private String buildFewShotPrompt(String basePrompt, List<ExampleData> examples) {
         if (examples == null || examples.isEmpty()) {
             return basePrompt;
