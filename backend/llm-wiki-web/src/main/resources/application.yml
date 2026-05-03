@@ -23,13 +23,13 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-  server:
-    port: 8080
+server:
+  port: 8080
 
-  logging:
-    level:
-      root: INFO
-      com.llmwiki: DEBUG
+logging:
+  level:
+    root: INFO
+    com.llmwiki: DEBUG
 
 ai:
   api:

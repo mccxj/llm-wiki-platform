@@ -8,6 +8,7 @@ import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
+import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
@@ -55,10 +56,23 @@ public class OpenAiApiClient implements AiApiClient {
             For each entity, provide the character position (start_offset, end_offset) where the entity
             appears in the source text. If the entity appears multiple times, use the first occurrence.
 
-            Also identify relationships between entities found in the text.
+            Also extract structured relationships between entities. Use these relation types:
+            - DEPENDS_ON: A depends on B (e.g., "Spring depends on Java")
+            - IS_A: A is a type of B (e.g., "Java is a programming language")
+            - PART_OF: A is part of B (e.g., "CPU is part of a computer")
+            - CREATED_BY: A was created by B (e.g., "Java was created by Sun Microsystems")
+            - USED_BY: A is used by B (e.g., "Docker is used by developers")
+            - COMPETES_WITH: A competes with B (e.g., "React competes with Vue")
+            - IMPLEMENTS: A implements B (e.g., "ArrayList implements List")
+            - EXTENDS: A extends B (e.g., "Integer extends Number")
+            - RELATED_TO: Generic relation when none of the above apply
+            - MENTIONS: A mentions B without a specific semantic relation
+
+            Each relation must include a confidence score from 0.0 to 1.0.
+            Only include relations with confidence >= 0.5.
 
             Respond in JSON format:
-            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity_name"]}]}
+            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity_name"]}],"relations":[{"source":"entity_name","target":"entity_name","type":"RELATION_TYPE","confidence":0.95}]}
             """;
 
     private static final String CONCEPT_SYSTEM_PROMPT_DEFAULT = """
@@ -157,6 +171,7 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
+            // Use sliding window chunking with sentence boundary awareness
             List<TextChunk> textChunks = chunker.chunk(content);
             List<String> chunks = new ArrayList<>();
             for (TextChunk tc : textChunks) {
@@ -164,6 +179,7 @@ public class OpenAiApiClient implements AiApiClient {
             }
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
+            List<RelationInfo> allRelations = new ArrayList<>();
             int extractionIdx = 0;
 
             for (String chunk : chunks) {
@@ -194,8 +210,22 @@ public class OpenAiApiClient implements AiApiClient {
                         allEntities.add(entity);
                     }
                 }
+                // E-6: Parse structured relations
+                JsonNode relArr = root.get("relations");
+                if (relArr != null && relArr.isArray()) {
+                    for (JsonNode node : relArr) {
+                        String source = node.has("source") ? node.get("source").asText() : "";
+                        String target = node.has("target") ? node.get("target").asText() : "";
+                        String type = node.has("type") ? node.get("type").asText() : "RELATED_TO";
+                        double confidence = node.has("confidence") ? node.get("confidence").asDouble() : 0.5;
+                        if (!source.isBlank() && !target.isBlank()) {
+                            allRelations.add(new RelationInfo(source, target, type, confidence));
+                        }
+                    }
+                }
             }
 
+            // Deduplicate by name (keep first occurrence)
             Map<String, EntityInfo> deduped = new LinkedHashMap<>();
             for (EntityInfo e : allEntities) {
                 String key = e.getName().toLowerCase();
@@ -220,6 +250,8 @@ public class OpenAiApiClient implements AiApiClient {
 
             merged.setEntities(finalEntities);
             merged.setConcepts(Collections.emptyList());
+            // E-6: Set relations
+            merged.setRelations(allRelations);
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract entities", e);
@@ -257,6 +289,7 @@ public class OpenAiApiClient implements AiApiClient {
                             for (JsonNode r : rel) related.add(r.asText());
                         }
                         String name = node.get("name").asText();
+<<<<<<< HEAD
                         ConceptInfo concept = new ConceptInfo(
                                 name,
                                 node.has("description") ? node.get("description").asText() : "",
@@ -270,10 +303,20 @@ public class OpenAiApiClient implements AiApiClient {
 
                         concept.setExtractionIndex(extractionIdx++);
                         allConcepts.add(concept);
+=======
+                        allConcepts.add(new ConceptInfo(
+                                name,
+                                node.has("description") ? node.get("description").asText() : "",
+                                related));
+>>>>>>> origin/master
                     }
                 }
             }
 
+<<<<<<< HEAD
+=======
+            // Deduplicate by name
+>>>>>>> origin/master
             Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
             for (ConceptInfo c : allConcepts) {
                 String key = c.getName().toLowerCase();
@@ -282,6 +325,7 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
+<<<<<<< HEAD
             List<ConceptInfo> finalConcepts = new ArrayList<>();
             for (ConceptInfo c : deduped.values()) {
                 if (c.getStartOffset() == null) {
@@ -298,6 +342,10 @@ public class OpenAiApiClient implements AiApiClient {
 
             merged.setEntities(Collections.emptyList());
             merged.setConcepts(finalConcepts);
+=======
+            merged.setEntities(Collections.emptyList());
+            merged.setConcepts(new ArrayList<>(deduped.values()));
+>>>>>>> origin/master
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract concepts", e);
@@ -411,6 +459,13 @@ public class OpenAiApiClient implements AiApiClient {
         }
     }
 
+<<<<<<< HEAD
+=======
+    /**
+     * Build a few-shot prompt from a base system prompt and examples.
+     * Falls back to the base prompt when no examples are provided.
+     */
+>>>>>>> origin/master
     private String buildFewShotPrompt(String basePrompt, List<ExampleData> examples) {
         if (examples == null || examples.isEmpty()) {
             return basePrompt;
