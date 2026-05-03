@@ -260,7 +260,7 @@ public class PipelineService {
                 // P1-4: Update description if the new one is richer
                 if (entity.getDescription() != null && !entity.getDescription().isEmpty()
                         && (node.getDescription() == null || node.getDescription().length() < entity.getDescription().length())) {
-                    node.setDescription(entity.getDescription());
+                    node.setDescription(buildDescriptionWithGrounding(entity.getDescription(), entity));
                     // Also update sub-type if previously null
                     if (node.getEntitySubType() == null && entity.getType() != null) {
                         node.setEntitySubType(entity.getType());
@@ -270,10 +270,11 @@ public class PipelineService {
                 matched.add(node);
                 entityNodeMap.put(entity.getName().toLowerCase(), node);
             } else {
+                String description = buildDescriptionWithGrounding(entity.getDescription(), entity);
                 KgNode node = kgNodeRepo.save(KgNode.builder()
                         .name(entity.getName())
                         .nodeType(NodeType.ENTITY)
-                        .description(entity.getDescription())
+                        .description(description)
                         .entitySubType(entity.getType())
                         .build());
                 embedAndSave(node);
@@ -304,15 +305,16 @@ public class PipelineService {
                 // P1-4: Update description if the new one is richer
                 if (concept.getDescription() != null && !concept.getDescription().isEmpty()
                         && (conceptNode.getDescription() == null || conceptNode.getDescription().length() < concept.getDescription().length())) {
-                    conceptNode.setDescription(concept.getDescription());
+                    conceptNode.setDescription(buildDescriptionWithGrounding(concept.getDescription(), concept));
                     kgNodeRepo.save(conceptNode);
                 }
                 matched.add(conceptNode);
             } else {
+                String description = buildDescriptionWithGrounding(concept.getDescription(), concept);
                 conceptNode = kgNodeRepo.save(KgNode.builder()
                         .name(concept.getName())
                         .nodeType(NodeType.CONCEPT)
-                        .description(concept.getDescription())
+                        .description(description)
                         .build());
                 embedAndSave(conceptNode);
                 matched.add(conceptNode);
@@ -328,6 +330,44 @@ public class PipelineService {
         }
 
         return matched;
+    }
+
+    /**
+     * Append source grounding metadata to the description when position info is available.
+     */
+    private String buildDescriptionWithGrounding(String baseDescription, ExtractionResult.EntityInfo entity) {
+        if (entity.getStartOffset() == null) return baseDescription;
+        StringBuilder sb = new StringBuilder();
+        if (baseDescription != null) sb.append(baseDescription);
+        sb.append(" [grounding: offset=").append(entity.getStartOffset())
+          .append("-").append(entity.getEndOffset());
+        if (entity.getAlignmentStatus() != null) {
+            sb.append(", status=").append(entity.getAlignmentStatus());
+        }
+        if (entity.getExtractionIndex() != null) {
+            sb.append(", index=").append(entity.getExtractionIndex());
+        }
+        sb.append("]");
+        return sb.toString();
+    }
+
+    /**
+     * Append source grounding metadata to the description when position info is available.
+     */
+    private String buildDescriptionWithGrounding(String baseDescription, ExtractionResult.ConceptInfo concept) {
+        if (concept.getStartOffset() == null) return baseDescription;
+        StringBuilder sb = new StringBuilder();
+        if (baseDescription != null) sb.append(baseDescription);
+        sb.append(" [grounding: offset=").append(concept.getStartOffset())
+          .append("-").append(concept.getEndOffset());
+        if (concept.getAlignmentStatus() != null) {
+            sb.append(", status=").append(concept.getAlignmentStatus());
+        }
+        if (concept.getExtractionIndex() != null) {
+            sb.append(", index=").append(concept.getExtractionIndex());
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     private void embedAndSave(KgNode node) {
