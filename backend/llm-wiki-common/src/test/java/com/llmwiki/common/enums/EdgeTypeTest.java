@@ -13,13 +13,14 @@ class EdgeTypeTest {
         assertNotNull(EdgeType.CONTRADICTS);
         assertNotNull(EdgeType.SUPERSEDES);
         assertNotNull(EdgeType.MENTIONS);
-        assertNotNull(EdgeType.DEPENDS_ON);
         assertNotNull(EdgeType.IS_A);
-        assertNotNull(EdgeType.CREATED_BY);
-        assertNotNull(EdgeType.USED_BY);
-        assertNotNull(EdgeType.COMPETES_WITH);
-        assertNotNull(EdgeType.IMPLEMENTS);
         assertNotNull(EdgeType.EXTENDS);
+        assertNotNull(EdgeType.IMPLEMENTS);
+        assertNotNull(EdgeType.DEPENDS_ON);
+        assertNotNull(EdgeType.USED_BY);
+        assertNotNull(EdgeType.CREATED_BY);
+        assertNotNull(EdgeType.COMPETES_WITH);
+        assertNotNull(EdgeType.SIMILAR_TO);
     }
 
     @Test
@@ -32,6 +33,5 @@ class EdgeTypeTest {
         assertEquals(EdgeType.DEPENDS_ON, EdgeType.valueOf("DEPENDS_ON"));
         assertEquals(EdgeType.IS_A, EdgeType.valueOf("IS_A"));
         assertEquals(EdgeType.CREATED_BY, EdgeType.valueOf("CREATED_BY"));
-    }
     }
 }

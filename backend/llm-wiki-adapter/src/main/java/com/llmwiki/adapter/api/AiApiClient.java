@@ -51,4 +51,14 @@ public interface AiApiClient {
      * Check if the AI API service is available.
      */
     boolean isAvailable();
+
+    /**
+     * Extract entities with a specific temperature (single-pass).
+     */
+    ExtractionResult extractEntitiesWithTemperature(String content, double temperature);
+
+    /**
+     * Extract concepts with a specific temperature (single-pass).
+     */
+    ExtractionResult extractConceptsWithTemperature(String content, double temperature);
 }

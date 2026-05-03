@@ -14,10 +14,12 @@ import static org.junit.jupiter.api.Assertions.*;
 class OpenAiApiClientFewShotTest {
 
     OpenAiApiClient client;
+    AlignmentResolver resolver;
 
     @BeforeEach
     void setUp() {
-        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", "", new AlignmentResolver());
+        resolver = new AlignmentResolver();
+        client = new OpenAiApiClient("http://localhost:9999", "test-key", "test-model", "", "", "", "", resolver);
     }
 
     @Test

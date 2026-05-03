@@ -27,6 +27,8 @@ public class ExtractionResult {
         private Integer endOffset;
         private AlignmentStatus alignmentStatus;
         private Integer extractionIndex;
+        private int passCount;
+        private double confidence;
 
         public EntityInfo() {}
         public EntityInfo(String name, String type, String description) {
@@ -51,6 +53,10 @@ public class ExtractionResult {
         public void setAlignmentStatus(AlignmentStatus alignmentStatus) { this.alignmentStatus = alignmentStatus; }
         public Integer getExtractionIndex() { return extractionIndex; }
         public void setExtractionIndex(Integer extractionIndex) { this.extractionIndex = extractionIndex; }
+        public int getPassCount() { return passCount; }
+        public void setPassCount(int passCount) { this.passCount = passCount; }
+        public double getConfidence() { return confidence; }
+        public void setConfidence(double confidence) { this.confidence = confidence; }
     }
 
     public static class ConceptInfo {
@@ -61,6 +67,8 @@ public class ExtractionResult {
         private Integer endOffset;
         private AlignmentStatus alignmentStatus;
         private Integer extractionIndex;
+        private int passCount;
+        private double confidence;
 
         public ConceptInfo() {}
         public ConceptInfo(String name, String description, List<String> relatedEntities) {
@@ -80,5 +88,9 @@ public class ExtractionResult {
         public void setAlignmentStatus(AlignmentStatus alignmentStatus) { this.alignmentStatus = alignmentStatus; }
         public Integer getExtractionIndex() { return extractionIndex; }
         public void setExtractionIndex(Integer extractionIndex) { this.extractionIndex = extractionIndex; }
+        public int getPassCount() { return passCount; }
+        public void setPassCount(int passCount) { this.passCount = passCount; }
+        public double getConfidence() { return confidence; }
+        public void setConfidence(double confidence) { this.confidence = confidence; }
     }
 }

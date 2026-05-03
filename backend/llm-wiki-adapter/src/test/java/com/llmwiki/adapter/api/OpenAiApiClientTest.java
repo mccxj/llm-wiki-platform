@@ -29,6 +29,7 @@ class OpenAiApiClientTest {
 
     @Test
     void isAvailable_shouldReturnTrueEvenForUnreachableServer() {
+        // isAvailable uses onErrorReturn("") so it always returns true
         assertTrue(client.isAvailable());
     }
 
