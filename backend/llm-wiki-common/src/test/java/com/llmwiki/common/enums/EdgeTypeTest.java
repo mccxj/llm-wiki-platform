@@ -13,10 +13,18 @@ class EdgeTypeTest {
         assertNotNull(EdgeType.CONTRADICTS);
         assertNotNull(EdgeType.SUPERSEDES);
         assertNotNull(EdgeType.MENTIONS);
+        assertNotNull(EdgeType.IS_A);
+        assertNotNull(EdgeType.EXTENDS);
+        assertNotNull(EdgeType.IMPLEMENTS);
+        assertNotNull(EdgeType.DEPENDS_ON);
+        assertNotNull(EdgeType.USED_BY);
+        assertNotNull(EdgeType.CREATED_BY);
+        assertNotNull(EdgeType.COMPETES_WITH);
+        assertNotNull(EdgeType.SIMILAR_TO);
     }
 
     @Test
-    void shouldHaveExactly6Types() {
-        assertEquals(6, EdgeType.values().length);
+    void shouldHaveExactly14Types() {
+        assertEquals(14, EdgeType.values().length);
     }
 }
