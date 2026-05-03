@@ -1,47 +1,44 @@
-# Task: E-4 Sliding Window Chunking
+# Task: E-5 Unified Extraction
 
 ## GitHub Issue
-#36 [E-4][P1] Replace naive chunking with sliding window strategy
+#37 [E-5][P1] Unified extraction — single LLM call for entities + concepts + relations
 
 ## Problem
-Current chunking splits on \n\n with no overlap. Entities at boundaries are truncated.
-
-## LangExtract Reference
-- langextract/chunking.py: TextChunk with token_interval tracking position in source
-- langextract/core/tokenizer.py: Sentence boundary detection
+Two separate LLM calls for entities/concepts causes inconsistent classification and 2x API cost.
 
 ## Implementation Plan
 
-### 1. Create TextChunk class (llm-wiki-adapter)
+### 1. Add extractAll() to AiApiClient interface
 ```java
-public class TextChunk {
-    private String text;
-    private int startOffset;  // char position in source
-    private int endOffset;
-    private int overlapStart; // overlap region start
-    private int overlapEnd;   // overlap region end
+ExtractionResult extractAll(String content);
+```
+
+### 2. Update ExtractionResult
+- Add relations field: List<RelationInfo>
+- RelationInfo: sourceName, targetName, type, confidence
+
+### 3. Update OpenAiApiClient
+- Unified prompt requesting entities + concepts + relations in one JSON call
+- New response schema:
+```json
+{
+  "entities": [...],
+  "concepts": [...],
+  "relations": [{"source": "Java", "target": "OOP", "type": "implements"}]
 }
 ```
 
-### 2. Create SlidingWindowChunker (llm-wiki-adapter, new class)
-- Config: maxChunkSize (default 8000), overlapSize (default 200)
-- Split on sentence boundaries when possible
-- Track position in source document
-- Handle edge cases: single sentence > maxChunkSize
+### 4. Update PipelineService
+- Use extractAll() instead of separate extractEntities() + extractConcepts()
+- Process relations from unified result
 
-### 3. Update OpenAiApiClient
-- Replace splitIntoChunks() with SlidingWindowChunker
-- Track chunk positions for entity offset adjustment
-
-### 4. Tests
-- Chunking with overlap
-- Sentence boundary detection
-- Position tracking accuracy
-- Edge cases: very long sentence, empty text
-
-## Files to Create
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/chunking/TextChunk.java
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/chunking/SlidingWindowChunker.java
+### 5. Tests
+- Unified prompt structure
+- Relation parsing
+- Backward compatibility with separate calls
 
 ## Files to Modify
+- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/AiApiClient.java
+- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/ExtractionResult.java
 - backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/OpenAiApiClient.java
+- backend/llm-wiki-service/src/main/java/com/llmwiki/service/pipeline/PipelineService.java
