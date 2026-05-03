@@ -6,6 +6,7 @@ import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
+import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
 import org.slf4j.Logger;
@@ -45,10 +46,23 @@ public class OpenAiApiClient implements AiApiClient {
             Extract named entities from the text. Identify people, organizations, technologies,
             tools, and other important named things. Do NOT include abstract concepts — those are handled separately.
 
-            Also identify relationships between entities found in the text.
+            Also extract structured relationships between entities. Use these relation types:
+            - DEPENDS_ON: A depends on B (e.g., "Spring depends on Java")
+            - IS_A: A is a type of B (e.g., "Java is a programming language")
+            - PART_OF: A is part of B (e.g., "CPU is part of a computer")
+            - CREATED_BY: A was created by B (e.g., "Java was created by Sun Microsystems")
+            - USED_BY: A is used by B (e.g., "Docker is used by developers")
+            - COMPETES_WITH: A competes with B (e.g., "React competes with Vue")
+            - IMPLEMENTS: A implements B (e.g., "ArrayList implements List")
+            - EXTENDS: A extends B (e.g., "Integer extends Number")
+            - RELATED_TO: Generic relation when none of the above apply
+            - MENTIONS: A mentions B without a specific semantic relation
+
+            Each relation must include a confidence score from 0.0 to 1.0.
+            Only include relations with confidence >= 0.5.
 
             Respond in JSON format:
-            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity_name"]}]}
+            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity_name"]}],"relations":[{"source":"entity_name","target":"entity_name","type":"RELATION_TYPE","confidence":0.95}]}
             """;
 
     private static final String CONCEPT_SYSTEM_PROMPT_DEFAULT = """
@@ -127,6 +141,7 @@ public class OpenAiApiClient implements AiApiClient {
             List<String> chunks = splitIntoChunks(content, 7000);
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
+            List<RelationInfo> allRelations = new ArrayList<>();
 
             for (String chunk : chunks) {
                 String response = callApi(systemPrompt, chunk);
@@ -146,6 +161,19 @@ public class OpenAiApiClient implements AiApiClient {
                                 related));
                     }
                 }
+                // E-6: Parse structured relations
+                JsonNode relArr = root.get("relations");
+                if (relArr != null && relArr.isArray()) {
+                    for (JsonNode node : relArr) {
+                        String source = node.has("source") ? node.get("source").asText() : "";
+                        String target = node.has("target") ? node.get("target").asText() : "";
+                        String type = node.has("type") ? node.get("type").asText() : "RELATED_TO";
+                        double confidence = node.has("confidence") ? node.get("confidence").asDouble() : 0.5;
+                        if (!source.isBlank() && !target.isBlank()) {
+                            allRelations.add(new RelationInfo(source, target, type, confidence));
+                        }
+                    }
+                }
             }
 
             // Deduplicate by name (keep first occurrence)
@@ -158,6 +186,8 @@ public class OpenAiApiClient implements AiApiClient {
             }
             merged.setEntities(new ArrayList<>(deduped.values()));
             merged.setConcepts(Collections.emptyList());
+            // E-6: Set relations
+            merged.setRelations(allRelations);
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract entities", e);

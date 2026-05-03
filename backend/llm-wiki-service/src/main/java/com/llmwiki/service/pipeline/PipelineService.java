@@ -5,6 +5,7 @@ import com.llmwiki.adapter.api.EmbeddingClient;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
+import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.common.enums.*;
 import com.llmwiki.domain.approval.entity.ApprovalQueue;
@@ -296,6 +297,19 @@ public class PipelineService {
             }
         }
 
+        // E-6: Create edges from structured relations with type and confidence
+        if (entities.getRelations() != null) {
+            for (RelationInfo relation : entities.getRelations()) {
+                if (!relation.hasValidType() || !relation.isConfident(0.5)) continue;
+                KgNode sourceNode = entityNodeMap.get(relation.getSourceEntity().toLowerCase());
+                KgNode targetNode = entityNodeMap.get(relation.getTargetEntity().toLowerCase());
+                if (sourceNode != null && targetNode != null) {
+                    EdgeType edgeType = mapRelationType(relation.getRelationType());
+                    createEdgeIfNotExists(sourceNode.getId(), targetNode.getId(), edgeType, relation.getConfidence());
+                }
+            }
+        }
+
         for (ConceptInfo concept : concepts.getConcepts()) {
             Optional<KgNode> existing = kgNodeRepo.findByNameAndNodeType(concept.getName(), NodeType.CONCEPT);
             final KgNode conceptNode;
@@ -410,6 +424,10 @@ public class PipelineService {
     }
 
     private void createEdgeIfNotExists(UUID sourceId, UUID targetId, EdgeType type) {
+        createEdgeIfNotExists(sourceId, targetId, type, 0.5);
+    }
+
+    private void createEdgeIfNotExists(UUID sourceId, UUID targetId, EdgeType type, double confidence) {
         // Check if edge already exists to avoid duplicates
         List<KgEdge> existing = kgEdgeRepo.findBySourceNodeId(sourceId);
         boolean alreadyExists = existing.stream()
@@ -422,8 +440,19 @@ public class PipelineService {
                 .sourceNodeId(sourceId)
                 .targetNodeId(targetId)
                 .edgeType(type)
-                .weight(BigDecimal.valueOf(0.5))
+                .weight(BigDecimal.valueOf(confidence))
                 .build());
+    }
+
+    // E-6: Map relation type string to EdgeType enum
+    private EdgeType mapRelationType(String relationType) {
+        if (relationType == null || relationType.isBlank()) return EdgeType.RELATED_TO;
+        try {
+            return EdgeType.valueOf(relationType.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown relation type: {}, falling back to RELATED_TO", relationType);
+            return EdgeType.RELATED_TO;
+        }
     }
 
     private Page generatePage(RawDocument doc, ScoreResult score, ExtractionResult entities, ExtractionResult concepts) {

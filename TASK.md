@@ -1,105 +1,66 @@
-# Task: E-2 Few-Shot Prompting Support
+# E-6: 结构化关系类型
 
-## GitHub Issue
-#34 [E-2][P0] Add few-shot prompting support for entity/concept extraction
+## 目标
+增强关系抽取，使 LLM 输出预定义的结构化关系类型（带方向性和置信度）。
 
-## Problem
-Current extraction uses zero-shot prompting which produces inconsistent quality for domain-specific content. LangExtract uses few-shot examples to improve accuracy by 15-30%.
+## 步骤
 
-## LangExtract Reference Architecture
-From LangExtract source code (google/langextract):
-- `langextract/core/data.py`: `ExampleData` dataclass with `text` + `extractions` list
-- `langextract/prompting.py`: `PromptTemplateStructured` with `description` + `examples`
-- `langextract/prompting.py`: `QAPromptGenerator` renders examples into prompt text
+### 1. 增强 EdgeType 枚举
+文件: `backend/llm-wiki-common/src/main/java/com/llmwiki/common/enums/EdgeType.java`
 
-Key pattern from LangExtract:
-```
-prompt = description + "\n\n" + formatted_examples + "\n\n" + actual_input
+新增关系类型：
+- DEPENDS_ON（依赖）
+- IS_A（是一种）
+- PART_OF（属于）
+- CREATED_BY（由...创建）
+- USED_BY（被...使用）
+- COMPETES_WITH（竞争）
+- IMPLEMENTS（实现）
+- EXTENDS（扩展）
 
-Where formatted_examples looks like:
-"Example 1:
-Text: {example_text}
-Extractions: {example_extractions}
+保留原有的 RELATED_TO, DERIVED_FROM, CONTRADICTS, SUPERSEDES, MENTIONS。
 
-Example 2:
-Text: {example_text}
-Extractions: {example_extractions}"
-```
+### 2. 新增 RelationInfo DTO
+文件: `backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/RelationInfo.java`
 
-## Implementation Plan
+字段：
+- sourceEntity (String)
+- targetEntity (String)
+- relationType (String) — 对应 EdgeType 名称
+- confidence (Double, 0.0-1.0)
 
-### 1. Add ExampleData class (llm-wiki-adapter)
-```java
-public class ExampleData {
-    private String text;
-    private List<LabeledExtraction> extractions;
-    
-    public static class LabeledExtraction {
-        private String extractionClass;  // entity class like "PERSON", "ORG"
-        private String extractionText;   // the actual text
-        private String description;
-        private List<String> attributes; // optional
-    }
-}
-```
+### 3. 修改 ExtractionResult
+文件: `backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/ExtractionResult.java`
 
-### 2. Add PromptTemplate class (llm-wiki-adapter)
-```java
-public class PromptTemplate {
-    private String description;
-    private List<ExampleData> examples;
-    
-    public String render(String inputText) {
-        // Build prompt: description + examples + input
-    }
-}
-```
+新增字段：
+- List<RelationInfo> relations
 
-### 3. Create EntityExample entity + repository (llm-wiki-domain)
-- `EntityExample` JPA entity: id, name, exampleType (ENTITY|CONCEPT), text, extractions (JSON), createdAt
-- `EntityExampleRepository`: findByType(), findAllActive()
+### 4. 修改 OpenAiApiClient 的 extractEntities prompt
+文件: `backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/OpenAiApiClient.java`
 
-### 4. Update OpenAiApiClient (llm-wiki-adapter)
-- Add `List<ExampleData>` parameter to extractEntities() and extractConcepts()
-- Build few-shot prompt when examples are available
-- Fall back to zero-shot when no examples
+在实体提取 prompt 中增加关系抽取指令：
+- 引导模型识别实体间的结构化关系
+- 输出格式包含 relations 数组
+- 每条关系包含 source, target, type, confidence
 
-### 5. Create EntityExampleService (llm-wiki-service)
-- CRUD for example management
-- Load examples from DB, convert to ExampleData
+### 5. 修改 PipelineService
+文件: `backend/llm-wiki-service/src/main/java/com/llmwiki/service/pipeline/PipelineService.java`
 
-### 6. DB Migration
-- V8__create_entity_examples.sql
+在 matchKnowledgeGraph 中：
+- 遍历 relations 创建 edges
+- 使用 relation type 映射到 EdgeType
+- 使用 confidence 作为 edge weight
+- 过滤低于置信度阈值的关系
 
-### 7. REST API (llm-wiki-web)
-- GET /api/examples — list all examples
-- POST /api/examples — create example
-- PUT /api/examples/{id} — update example
-- DELETE /api/examples/{id} — delete example
+### 6. 测试
+- RelationInfo 单元测试
+- EdgeType 映射测试
+- PipelineService 关系处理测试
+- OpenAiApiClient prompt 测试
 
-### 8. Tests
-- PromptTemplateTest: verify prompt rendering
-- EntityExampleServiceTest: CRUD operations
-- OpenAiApiClientTest: verify few-shot prompt structure when examples provided
-- EntityExampleRepositoryTest: DB queries
-
-## Files to Create/Modify
-NEW:
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/dto/ExampleData.java
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/prompting/PromptTemplate.java
-- backend/llm-wiki-domain/src/main/java/com/llmwiki/domain/example/entity/EntityExample.java
-- backend/llm-wiki-domain/src/main/java/com/llmwiki/domain/example/repository/EntityExampleRepository.java
-- backend/llm-wiki-service/src/main/java/com/llmwiki/service/example/EntityExampleService.java
-- backend/llm-wiki-web/src/main/java/com/llmwiki/web/controller/EntityExampleController.java
-- backend/llm-wiki-web/src/main/resources/db/migration/V8__create_entity_examples.sql
-
-MODIFY:
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/AiApiClient.java (add examples param)
-- backend/llm-wiki-adapter/src/main/java/com/llmwiki/adapter/api/OpenAiApiClient.java (implement few-shot)
-- backend/llm-wiki-service/src/main/java/com/llmwiki/service/pipeline/PipelineService.java (pass examples)
-
-## Development Rules
-- TDD: write tests first, then implement
-- Follow existing code style and patterns
-- All new classes need unit tests
-- Run `mvn test` after each change to verify no regressions
+## 验收标准
+- [ ] EdgeType 枚举包含至少 10 种语义关系
+- [ ] ExtractionResult 包含 relations 列表
+- [ ] LLM prompt 引导输出结构化关系
+- [ ] PipelineService 使用 relation type 和 confidence
+- [ ] 所有测试通过
