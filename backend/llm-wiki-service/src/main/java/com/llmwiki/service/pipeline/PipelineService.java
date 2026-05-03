@@ -2,10 +2,10 @@ package com.llmwiki.service.pipeline;
 
 import com.llmwiki.adapter.api.AiApiClient;
 import com.llmwiki.adapter.api.EmbeddingClient;
-import com.llmwiki.adapter.extraction.MultiPassExtractor;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
+import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.common.enums.*;
 import com.llmwiki.domain.approval.entity.ApprovalQueue;
@@ -61,7 +61,6 @@ public class PipelineService {
     private final AiApiClient aiClient;
     private final EmbeddingClient embeddingClient;
     private final ScoringService scoringService;
-    private final MultiPassExtractor multiPassExtractor;
 
     @Transactional
     public void processDocument(UUID rawDocId) {
@@ -73,7 +72,7 @@ public class PipelineService {
         // Step 1: Score
         ScoreResult scoreResult = executeWithRetry(rawDocId, "SCORE", () -> scoreDocument(doc));
         if (scoreResult == null) {
-            return; // already in DLQ
+            return;
         }
         if (!scoringService.passesThreshold(scoreResult)) {
             BigDecimal threshold = scoringService.getThreshold();
@@ -243,22 +242,11 @@ public class PipelineService {
     }
 
     private ExtractionResult extractEntities(RawDocument doc) {
-        ExtractionResult result = new ExtractionResult();
-        Set<String> entityTypes = Set.of("PERSON", "ORG", "TECH", "TOOL", "OTHER");
-        List<ExtractionResult.EntityInfo> entities = multiPassExtractor.extractAll(doc.getContent(), entityTypes);
-        result.setEntities(entities);
-        result.setConcepts(Collections.emptyList());
-        return result;
+        return aiClient.extractEntities(doc.getContent());
     }
 
     private ExtractionResult extractConcepts(RawDocument doc) {
-        ExtractionResult result = aiClient.extractConcepts(doc.getContent());
-        if (result == null) {
-            result = new ExtractionResult();
-            result.setEntities(Collections.emptyList());
-            result.setConcepts(Collections.emptyList());
-        }
-        return result;
+        return aiClient.extractConcepts(doc.getContent());
     }
 
     private List<KgNode> matchKnowledgeGraph(ExtractionResult entities, ExtractionResult concepts) {
@@ -288,7 +276,6 @@ public class PipelineService {
                         .name(entity.getName())
                         .nodeType(NodeType.ENTITY)
                         .description(description)
-                        .entitySubType(entity.getType())
                         .build());
                 embedAndSave(node);
                 matched.add(node);
@@ -310,6 +297,19 @@ public class PipelineService {
             }
         }
 
+        // E-6: Create edges from structured relations with type and confidence
+        if (entities.getRelations() != null) {
+            for (RelationInfo relation : entities.getRelations()) {
+                if (!relation.hasValidType() || !relation.isConfident(0.5)) continue;
+                KgNode sourceNode = entityNodeMap.get(relation.getSourceEntity().toLowerCase());
+                KgNode targetNode = entityNodeMap.get(relation.getTargetEntity().toLowerCase());
+                if (sourceNode != null && targetNode != null) {
+                    EdgeType edgeType = mapRelationType(relation.getRelationType());
+                    createEdgeIfNotExists(sourceNode.getId(), targetNode.getId(), edgeType, relation.getConfidence());
+                }
+            }
+        }
+
         for (ConceptInfo concept : concepts.getConcepts()) {
             Optional<KgNode> existing = kgNodeRepo.findByNameAndNodeType(concept.getName(), NodeType.CONCEPT);
             final KgNode conceptNode;
@@ -319,7 +319,6 @@ public class PipelineService {
                 if (concept.getDescription() != null && !concept.getDescription().isEmpty()
                         && (conceptNode.getDescription() == null || conceptNode.getDescription().length() < concept.getDescription().length())) {
                     conceptNode.setDescription(buildDescriptionWithGrounding(concept.getDescription(), concept));
-                    kgNodeRepo.save(conceptNode);
                 }
                 matched.add(conceptNode);
             } else {
@@ -463,6 +462,10 @@ public class PipelineService {
     }
 
     private void createEdgeIfNotExists(UUID sourceId, UUID targetId, EdgeType type) {
+        createEdgeIfNotExists(sourceId, targetId, type, 0.5);
+    }
+
+    private void createEdgeIfNotExists(UUID sourceId, UUID targetId, EdgeType type, double confidence) {
         // Check if edge already exists to avoid duplicates
         List<KgEdge> existing = kgEdgeRepo.findBySourceNodeId(sourceId);
         boolean alreadyExists = existing.stream()
@@ -475,8 +478,19 @@ public class PipelineService {
                 .sourceNodeId(sourceId)
                 .targetNodeId(targetId)
                 .edgeType(type)
-                .weight(BigDecimal.valueOf(0.5))
+                .weight(BigDecimal.valueOf(confidence))
                 .build());
+    }
+
+    // E-6: Map relation type string to EdgeType enum
+    private EdgeType mapRelationType(String relationType) {
+        if (relationType == null || relationType.isBlank()) return EdgeType.RELATED_TO;
+        try {
+            return EdgeType.valueOf(relationType.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            log.warn("Unknown relation type: {}, falling back to RELATED_TO", relationType);
+            return EdgeType.RELATED_TO;
+        }
     }
 
     private Page generatePage(RawDocument doc, ScoreResult score, ExtractionResult entities, ExtractionResult concepts) {

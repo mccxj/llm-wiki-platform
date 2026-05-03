@@ -27,4 +27,11 @@ class EdgeTypeTest {
     void shouldHaveExactly14Types() {
         assertEquals(14, EdgeType.values().length);
     }
+
+    @Test
+    void shouldMapFromString() {
+        assertEquals(EdgeType.DEPENDS_ON, EdgeType.valueOf("DEPENDS_ON"));
+        assertEquals(EdgeType.IS_A, EdgeType.valueOf("IS_A"));
+        assertEquals(EdgeType.CREATED_BY, EdgeType.valueOf("CREATED_BY"));
+    }
 }

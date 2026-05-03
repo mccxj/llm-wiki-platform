@@ -2,14 +2,17 @@ package com.llmwiki.adapter.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.llmwiki.adapter.chunking.SlidingWindowChunker;
+import com.llmwiki.adapter.chunking.TextChunk;
 import com.llmwiki.adapter.dto.ExampleData;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
+import com.llmwiki.adapter.dto.RelationInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
+import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.adapter.prompting.PromptTemplate;
 import com.llmwiki.adapter.resolver.AlignmentResolver;
-import com.llmwiki.adapter.dto.UnifiedExtractionResult;
 import com.llmwiki.common.enums.AlignmentStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,9 +25,6 @@ import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.util.*;
-
-import com.llmwiki.adapter.chunking.SlidingWindowChunker;
-import com.llmwiki.adapter.chunking.TextChunk;
 
 @Component
 public class OpenAiApiClient implements AiApiClient {
@@ -56,10 +56,23 @@ public class OpenAiApiClient implements AiApiClient {
             For each entity, provide the character position (start_offset, end_offset) where the entity
             appears in the source text. If the entity appears multiple times, use the first occurrence.
 
-            Also identify relationships between entities found in the text.
+            Also extract structured relationships between entities. Use these relation types:
+            - DEPENDS_ON: A depends on B (e.g., "Spring depends on Java")
+            - IS_A: A is a type of B (e.g., "Java is a programming language")
+            - PART_OF: A is part of B (e.g., "CPU is part of a computer")
+            - CREATED_BY: A was created by B (e.g., "Java was created by Sun Microsystems")
+            - USED_BY: A is used by B (e.g., "Docker is used by developers")
+            - COMPETES_WITH: A competes with B (e.g., "React competes with Vue")
+            - IMPLEMENTS: A implements B (e.g., "ArrayList implements List")
+            - EXTENDS: A extends B (e.g., "Integer extends Number")
+            - RELATED_TO: Generic relation when none of the above apply
+            - MENTIONS: A mentions B without a specific semantic relation
+
+            Each relation must include a confidence score from 0.0 to 1.0.
+            Only include relations with confidence >= 0.5.
 
             Respond in JSON format:
-            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity_name"]}]}
+            {"entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity_name"]}],"relations":[{"source":"entity_name","target":"entity_name","type":"RELATION_TYPE","confidence":0.95}]}
             """;
 
     private static final String CONCEPT_SYSTEM_PROMPT_DEFAULT = """
@@ -158,7 +171,6 @@ public class OpenAiApiClient implements AiApiClient {
     public ExtractionResult extractEntities(String content, List<ExampleData> examples) {
         try {
             String systemPrompt = buildFewShotPrompt(entitySystemPrompt, examples);
-            // Use sliding window chunking with sentence boundary awareness
             List<TextChunk> textChunks = chunker.chunk(content);
             List<String> chunks = new ArrayList<>();
             for (TextChunk tc : textChunks) {
@@ -166,6 +178,7 @@ public class OpenAiApiClient implements AiApiClient {
             }
             ExtractionResult merged = new ExtractionResult();
             List<EntityInfo> allEntities = new ArrayList<>();
+            List<RelationInfo> allRelations = new ArrayList<>();
             int extractionIdx = 0;
 
             for (String chunk : chunks) {
@@ -186,7 +199,6 @@ public class OpenAiApiClient implements AiApiClient {
                                 node.has("description") ? node.get("description").asText() : "",
                                 related);
 
-                        // Parse character positions from LLM response
                         if (node.has("start_offset") && node.has("end_offset")) {
                             entity.setStartOffset(node.get("start_offset").asInt());
                             entity.setEndOffset(node.get("end_offset").asInt());
@@ -197,9 +209,20 @@ public class OpenAiApiClient implements AiApiClient {
                         allEntities.add(entity);
                     }
                 }
+                JsonNode relArr = root.get("relations");
+                if (relArr != null && relArr.isArray()) {
+                    for (JsonNode node : relArr) {
+                        String source = node.has("source") ? node.get("source").asText() : "";
+                        String target = node.has("target") ? node.get("target").asText() : "";
+                        String type = node.has("type") ? node.get("type").asText() : "RELATED_TO";
+                        double confidence = node.has("confidence") ? node.get("confidence").asDouble() : 0.5;
+                        if (!source.isBlank() && !target.isBlank()) {
+                            allRelations.add(new RelationInfo(source, target, type, confidence));
+                        }
+                    }
+                }
             }
 
-            // Deduplicate by name (keep first occurrence)
             Map<String, EntityInfo> deduped = new LinkedHashMap<>();
             for (EntityInfo e : allEntities) {
                 String key = e.getName().toLowerCase();
@@ -208,7 +231,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Apply alignment resolver for entities without positions
             List<EntityInfo> finalEntities = new ArrayList<>();
             for (EntityInfo e : deduped.values()) {
                 if (e.getStartOffset() == null) {
@@ -225,6 +247,7 @@ public class OpenAiApiClient implements AiApiClient {
 
             merged.setEntities(finalEntities);
             merged.setConcepts(Collections.emptyList());
+            merged.setRelations(allRelations);
             return merged;
         } catch (Exception e) {
             log.error("Failed to extract entities", e);
@@ -267,7 +290,6 @@ public class OpenAiApiClient implements AiApiClient {
                                 node.has("description") ? node.get("description").asText() : "",
                                 related);
 
-                        // Parse character positions from LLM response
                         if (node.has("start_offset") && node.has("end_offset")) {
                             concept.setStartOffset(node.get("start_offset").asInt());
                             concept.setEndOffset(node.get("end_offset").asInt());
@@ -280,7 +302,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Deduplicate by name
             Map<String, ConceptInfo> deduped = new LinkedHashMap<>();
             for (ConceptInfo c : allConcepts) {
                 String key = c.getName().toLowerCase();
@@ -289,7 +310,6 @@ public class OpenAiApiClient implements AiApiClient {
                 }
             }
 
-            // Apply alignment resolver for concepts without positions
             List<ConceptInfo> finalConcepts = new ArrayList<>();
             for (ConceptInfo c : deduped.values()) {
                 if (c.getStartOffset() == null) {
@@ -419,17 +439,12 @@ public class OpenAiApiClient implements AiApiClient {
         }
     }
 
-    /**
-     * Build a few-shot prompt from a base system prompt and examples.
-     * Falls back to the base prompt when no examples are provided.
-     */
     private String buildFewShotPrompt(String basePrompt, List<ExampleData> examples) {
         if (examples == null || examples.isEmpty()) {
             return basePrompt;
         }
         PromptTemplate template = new PromptTemplate(basePrompt, examples);
         String rendered = template.render("{{INPUT}}");
-        // Remove the trailing placeholder since the actual input is sent as the user message
         return rendered.substring(0, rendered.lastIndexOf("Text: {{INPUT}}"));
     }
 
@@ -485,30 +500,6 @@ public class OpenAiApiClient implements AiApiClient {
         Map<?, ?> choice = (Map<?, ?>) choices.get(0);
         Map<?, ?> message = (Map<?, ?>) choice.get("message");
         return (String) message.get("content");
-    }
-
-    private List<String> splitIntoChunks(String content, int maxChunkSize) {
-        List<String> chunks = new ArrayList<>();
-        if (content == null || content.isEmpty()) {
-            chunks.add("");
-            return chunks;
-        }
-        int start = 0;
-        while (start < content.length()) {
-            int end = Math.min(start + maxChunkSize, content.length());
-            chunks.add(content.substring(start, end));
-            start = end;
-        }
-        return chunks;
-    }
-
-    private List<String> parseStringList(JsonNode root, String field) {
-        List<String> list = new ArrayList<>();
-        JsonNode arr = root.get(field);
-        if (arr != null && arr.isArray()) {
-            for (JsonNode n : arr) list.add(n.asText());
-        }
-        return list;
     }
 
     @Override
@@ -598,5 +589,29 @@ public class OpenAiApiClient implements AiApiClient {
             log.error("Failed to extract concepts with temperature {}", temperature, e);
             return new ExtractionResult();
         }
+    }
+
+    private List<String> splitIntoChunks(String content, int maxChunkSize) {
+        List<String> chunks = new ArrayList<>();
+        if (content == null || content.isEmpty()) {
+            chunks.add("");
+            return chunks;
+        }
+        int start = 0;
+        while (start < content.length()) {
+            int end = Math.min(start + maxChunkSize, content.length());
+            chunks.add(content.substring(start, end));
+            start = end;
+        }
+        return chunks;
+    }
+
+    private List<String> parseStringList(JsonNode root, String field) {
+        List<String> list = new ArrayList<>();
+        JsonNode arr = root.get(field);
+        if (arr != null && arr.isArray()) {
+            for (JsonNode n : arr) list.add(n.asText());
+        }
+        return list;
     }
 }

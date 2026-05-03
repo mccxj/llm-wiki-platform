@@ -2,24 +2,27 @@ package com.llmwiki.service.pipeline;
 
 import com.llmwiki.adapter.api.AiApiClient;
 import com.llmwiki.adapter.api.EmbeddingClient;
-import com.llmwiki.adapter.extraction.MultiPassExtractor;
 import com.llmwiki.adapter.dto.ExtractionResult;
 import com.llmwiki.adapter.dto.ExtractionResult.ConceptInfo;
 import com.llmwiki.adapter.dto.ExtractionResult.EntityInfo;
 import com.llmwiki.adapter.dto.ScoreResult;
 import com.llmwiki.common.enums.*;
 import com.llmwiki.domain.approval.repository.ApprovalQueueRepository;
+import com.llmwiki.domain.config.repository.SystemConfigRepository;
+import com.llmwiki.domain.graph.entity.KgEdge;
+import com.llmwiki.domain.graph.entity.KgNode;
 import com.llmwiki.domain.graph.repository.KgEdgeRepository;
 import com.llmwiki.domain.graph.repository.KgNodeRepository;
 import com.llmwiki.domain.graph.repository.KgVectorRepository;
+import com.llmwiki.domain.page.entity.Page;
 import com.llmwiki.domain.page.repository.PageLinkRepository;
 import com.llmwiki.domain.page.repository.PageRepository;
 import com.llmwiki.domain.page.repository.PageTagRepository;
+import com.llmwiki.domain.pipeline.entity.DeadLetterQueue;
 import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
-import com.llmwiki.domain.config.repository.SystemConfigRepository;
 import com.llmwiki.service.scoring.ScoringService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,8 +31,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -39,196 +40,598 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 class PipelineServiceTest {
 
-    @Mock private RawDocumentRepository rawDocRepo;
-    @Mock private ProcessingLogRepository procLogRepo;
-    @Mock private KgNodeRepository kgNodeRepo;
-    @Mock private KgEdgeRepository kgEdgeRepo;
-    @Mock private KgVectorRepository kgVectorRepo;
-    @Mock private PageRepository pageRepo;
-    @Mock private PageLinkRepository pageLinkRepo;
-    @Mock private PageTagRepository pageTagRepo;
-    @Mock private ApprovalQueueRepository approvalQueueRepo;
-    @Mock private DeadLetterQueueRepository deadLetterQueueRepo;
-    @Mock private SystemConfigRepository configRepo;
-    @Mock private AiApiClient aiClient;
-    @Mock private EmbeddingClient embeddingClient;
-    @Mock private ScoringService scoringService;
-    @Mock private MultiPassExtractor multiPassExtractor;
+    @Mock RawDocumentRepository rawDocRepo;
+    @Mock ProcessingLogRepository procLogRepo;
+    @Mock KgNodeRepository kgNodeRepo;
+    @Mock KgEdgeRepository kgEdgeRepo;
+    @Mock KgVectorRepository kgVectorRepo;
+    @Mock PageRepository pageRepo;
+    @Mock PageLinkRepository pageLinkRepo;
+    @Mock PageTagRepository pageTagRepo;
+    @Mock ApprovalQueueRepository approvalQueueRepo;
+    @Mock DeadLetterQueueRepository deadLetterQueueRepo;
+    @Mock SystemConfigRepository configRepo;
+    @Mock AiApiClient aiClient;
+    @Mock EmbeddingClient embeddingClient;
+    @Mock ScoringService scoringService;
 
     @InjectMocks
-    private PipelineService pipelineService;
+    PipelineService pipelineService;
 
-    private RawDocument testDoc;
+    UUID rawDocId;
+    RawDocument doc;
+    ScoreResult scoreResult;
+    ExtractionResult entities;
+    ExtractionResult concepts;
 
     @BeforeEach
     void setUp() {
-        testDoc = new RawDocument();
-        testDoc.setId(UUID.randomUUID());
-        testDoc.setTitle("Test Document");
-        testDoc.setContent("Test content with some entities");
-        testDoc.setSourceUrl("http://example.com/doc");
+        rawDocId = UUID.randomUUID();
+        doc = RawDocument.builder()
+                .id(rawDocId).sourceId("src-1").sourceName("test-wiki")
+                .title("Java Programming").content("Java is a programming language.")
+                .contentHash("abc123").build();
 
-        when(configRepo.findByKey("pipeline.max.retries"))
-                .thenReturn(Optional.empty());  // uses default 3
+        scoreResult = new ScoreResult();
+        scoreResult.setOverallScore(new BigDecimal("7.5"));
+        scoreResult.setReason("Good quality");
+        scoreResult.setScores(Map.of("information_density", 8, "entity_richness", 7));
+        scoreResult.setKeyEntities(List.of("Java"));
+        scoreResult.setSuggestedTags(List.of("programming", "language"));
+
+        entities = new ExtractionResult();
+        entities.setEntities(List.of(
+                new EntityInfo("Java", "TECH", "Programming language", List.of("Sun Microsystems")),
+                new EntityInfo("Sun Microsystems", "ORG", "Tech company", List.of("Java"))));
+        entities.setConcepts(Collections.emptyList());
+
+        concepts = new ExtractionResult();
+        concepts.setEntities(Collections.emptyList());
+        concepts.setConcepts(List.of(
+                new ConceptInfo("OOP", "Object-Oriented", List.of("Java"))));
     }
 
     @Test
-    void shouldScoreDocument() {
-        ScoreResult scoreResult = new ScoreResult();
-        scoreResult.setOverallScore(BigDecimal.valueOf(8.0));
-        scoreResult.setScores(Map.of("information_density", 8, "entity_richness", 7,
-                "knowledge_independence", 9, "structure_integrity", 8, "timeliness", 7));
-        scoreResult.setReason("Good document");
-        scoreResult.setKeyEntities(List.of("Entity1"));
-        scoreResult.setSuggestedTags(List.of("tag1"));
-
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
-        when(scoringService.scoreDocument(any())).thenReturn(scoreResult);
-        when(scoringService.passesThreshold(any())).thenReturn(false);
-        when(scoringService.getThreshold()).thenReturn(BigDecimal.valueOf(5.0));
-
-        pipelineService.processDocument(testDoc.getId());
-
-        verify(scoringService).scoreDocument(testDoc.getContent());
-    }
-
-    @Test
-    void shouldExtractEntitiesUsingMultiPass() {
-        ExtractionResult emptyConcepts = new ExtractionResult();
-        emptyConcepts.setEntities(Collections.emptyList());
-        emptyConcepts.setConcepts(Collections.emptyList());
-
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
-        when(scoringService.passesThreshold(any())).thenReturn(true);
-        when(multiPassExtractor.extractAll(any(), any())).thenReturn(List.of(
-                new EntityInfo("Java", "TECH", "Programming language"),
-                new EntityInfo("Spring", "TECH", "Framework")
-        ));
-        when(aiClient.extractConcepts(any())).thenReturn(emptyConcepts);
-        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
-        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
-        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
-
-        ScoreResult scoreResult = new ScoreResult();
-        scoreResult.setOverallScore(BigDecimal.valueOf(8.0));
-        scoreResult.setScores(Map.of("information_density", 8, "entity_richness", 7,
-                "knowledge_independence", 9, "structure_integrity", 8, "timeliness", 7));
-        scoreResult.setReason("Good");
-        scoreResult.setKeyEntities(List.of());
-        scoreResult.setSuggestedTags(List.of());
-        when(scoringService.scoreDocument(any())).thenReturn(scoreResult);
-
-        pipelineService.processDocument(testDoc.getId());
-
-        verify(multiPassExtractor).extractAll(eq(testDoc.getContent()), any());
-    }
-
-    @Test
-    void shouldExtractConcepts() {
-        ExtractionResult conceptResult = new ExtractionResult();
-        conceptResult.setEntities(Collections.emptyList());
-        conceptResult.setConcepts(List.of(
-                new ConceptInfo("OOP", "Object-oriented programming", List.of("Java"))
-        ));
-
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
-        when(scoringService.passesThreshold(any())).thenReturn(true);
-        when(multiPassExtractor.extractAll(any(), any())).thenReturn(Collections.emptyList());
-        when(aiClient.extractConcepts(any())).thenReturn(conceptResult);
-        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
-        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
-
-        ScoreResult scoreResult = new ScoreResult();
-        scoreResult.setOverallScore(BigDecimal.valueOf(8.0));
-        scoreResult.setScores(Map.of("information_density", 8, "entity_richness", 7,
-                "knowledge_independence", 9, "structure_integrity", 8, "timeliness", 7));
-        scoreResult.setReason("Good");
-        scoreResult.setKeyEntities(List.of());
-        scoreResult.setSuggestedTags(List.of());
-        when(scoringService.scoreDocument(any())).thenReturn(scoreResult);
-
-        pipelineService.processDocument(testDoc.getId());
-
-        verify(aiClient).extractConcepts(testDoc.getContent());
-    }
-
-    @Test
-    void shouldCreateKnowledgeGraphNodes() {
-        ExtractionResult emptyConcepts = new ExtractionResult();
-        emptyConcepts.setEntities(Collections.emptyList());
-        emptyConcepts.setConcepts(Collections.emptyList());
-
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
-        when(scoringService.passesThreshold(any())).thenReturn(true);
-        when(multiPassExtractor.extractAll(any(), any())).thenReturn(List.of(
-                new EntityInfo("Python", "TECH", "Language")
-        ));
-        when(aiClient.extractConcepts(any())).thenReturn(emptyConcepts);
-        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
-        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
-        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
-
-        ScoreResult scoreResult = new ScoreResult();
-        scoreResult.setOverallScore(BigDecimal.valueOf(8.0));
-        scoreResult.setScores(Map.of("information_density", 8, "entity_richness", 7,
-                "knowledge_independence", 9, "structure_integrity", 8, "timeliness", 7));
-        scoreResult.setReason("Good");
-        scoreResult.setKeyEntities(List.of());
-        scoreResult.setSuggestedTags(List.of());
-        when(scoringService.scoreDocument(any())).thenReturn(scoreResult);
-
-        pipelineService.processDocument(testDoc.getId());
-
-        verify(kgNodeRepo, atLeastOnce()).save(any());
-    }
-
-    @Test
-    void shouldSucceedOnRetry() {
-        RawDocument doc = new RawDocument();
-        doc.setId(UUID.randomUUID());
-        doc.setTitle("Retry Doc");
-        doc.setContent("retry content");
-        doc.setSourceUrl("http://retry.com");
-
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(doc));
-        when(scoringService.scoreDocument(any()))
-                .thenThrow(new RuntimeException("Temporary failure"))
-                .thenReturn(new ScoreResult() {{ setOverallScore(BigDecimal.valueOf(6.0)); }});
-        when(scoringService.passesThreshold(any())).thenReturn(false);
-        when(scoringService.getThreshold()).thenReturn(BigDecimal.valueOf(5.0));
-
-        pipelineService.processDocument(doc.getId());
-
-        verify(scoringService, atLeast(2)).scoreDocument(any());
-    }
-
-    @Test
-    void shouldSaveToDLQOnPersistentFailure() {
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
-        when(scoringService.scoreDocument(any())).thenThrow(new RuntimeException("Persistent failure"));
-
-        pipelineService.processDocument(testDoc.getId());
-
-        verify(deadLetterQueueRepo).save(any());
-    }
-
-    @Test
-    void shouldSkipBelowThreshold() {
+    void processDocument_shouldSkipWhenScoreBelowThreshold() {
         ScoreResult lowScore = new ScoreResult();
-        lowScore.setOverallScore(BigDecimal.valueOf(2.0));
+        lowScore.setOverallScore(new BigDecimal("3.0"));
         lowScore.setReason("Low quality");
 
-        when(rawDocRepo.findById(any())).thenReturn(Optional.of(testDoc));
-        when(scoringService.scoreDocument(any())).thenReturn(lowScore);
-        when(scoringService.passesThreshold(any())).thenReturn(false);
-        when(scoringService.getThreshold()).thenReturn(BigDecimal.valueOf(5.0));
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(lowScore);
+        when(scoringService.passesThreshold(lowScore)).thenReturn(false);
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
-        pipelineService.processDocument(testDoc.getId());
+        pipelineService.processDocument(rawDocId);
 
-        verify(scoringService).scoreDocument(testDoc.getContent());
-        verify(aiClient, never()).extractEntities(any());
+        verify(scoringService).scoreDocument(doc.getContent());
+        verify(pageRepo, never()).save(any());
+        verify(kgNodeRepo, never()).save(any());
+        verify(procLogRepo, atLeastOnce()).save(any());
+    }
+
+    @Test
+    void processDocument_shouldProcessWhenScoreAboveThreshold() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        verify(scoringService).scoreDocument(doc.getContent());
+        verify(aiClient).extractEntities(doc.getContent());
+        verify(aiClient).extractConcepts(doc.getContent());
+        verify(kgNodeRepo, atLeast(3)).save(any(KgNode.class));
+        verify(pageRepo, atLeast(1)).save(any(Page.class));
+        verify(approvalQueueRepo).save(any());
+    }
+
+    @Test
+    void processDocument_shouldUseExistingKgNodes() {
+        KgNode existingNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY)
+                .description("A programming language").build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        ArgumentCaptor<KgNode> nodeCaptor = ArgumentCaptor.forClass(KgNode.class);
+        verify(kgNodeRepo, atLeastOnce()).save(nodeCaptor.capture());
+        long javaEntitySaves = nodeCaptor.getAllValues().stream()
+                .filter(n -> n.getNodeType() == NodeType.ENTITY && "Java".equals(n.getName())).count();
+        assertEquals(0, javaEntitySaves);
+    }
+
+    @Test
+    void processDocument_shouldCreateEdgesBetweenConceptsAndEntities() {
+        KgNode entityNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
+        KgNode conceptNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("OOP").nodeType(NodeType.CONCEPT).build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
+        when(kgEdgeRepo.save(any(KgEdge.class))).thenAnswer(i -> i.getArgument(0));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        verify(kgEdgeRepo, atLeast(2)).save(any(KgEdge.class));
+    }
+
+    @Test
+    void processDocument_shouldNotCreateDuplicateEdges() {
+        KgNode entityNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
+        KgNode conceptNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("OOP").nodeType(NodeType.CONCEPT).build();
+        KgEdge existingEdge = KgEdge.builder()
+                .id(UUID.randomUUID()).sourceNodeId(conceptNode.getId())
+                .targetNodeId(entityNode.getId()).edgeType(EdgeType.RELATED_TO)
+                .weight(BigDecimal.valueOf(0.5)).build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgEdgeRepo.findBySourceNodeId(conceptNode.getId())).thenReturn(List.of(existingEdge));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        verify(kgEdgeRepo, never()).save(any(KgEdge.class));
+    }
+
+    @Test
+    void processDocument_shouldAutoSubmitForApproval() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        ArgumentCaptor<com.llmwiki.domain.approval.entity.ApprovalQueue> captor =
+                ArgumentCaptor.forClass(com.llmwiki.domain.approval.entity.ApprovalQueue.class);
+        verify(approvalQueueRepo).save(captor.capture());
+        assertEquals(ApprovalStatus.PENDING.name(), captor.getValue().getStatus());
+        assertEquals(ApprovalAction.CREATE.name(), captor.getValue().getAction());
+    }
+
+    @Test
+    void processDocument_shouldThrowWhenDocNotFound() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> pipelineService.processDocument(rawDocId));
+    }
+
+    @Test
+    void generateUniqueSlug_shouldAppendSuffixForDuplicates() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(pageRepo.findBySlug("java-programming")).thenReturn(Optional.of(Page.builder().build()));
+        when(pageRepo.findBySlug("java-programming-1")).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        ArgumentCaptor<Page> pageCaptor = ArgumentCaptor.forClass(Page.class);
+        verify(pageRepo, atLeast(1)).save(pageCaptor.capture());
+        // The last save should have the slug
+        List<Page> savedPages = pageCaptor.getAllValues();
+        assertEquals("java-programming-1", savedPages.get(savedPages.size() - 1).getSlug());
+    }
+
+    // ===== Retry + DLQ Tests =====
+
+    @Test
+    void processDocument_shouldRetryOnFailureAndSaveToDlq() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        // Score always fails
+        when(scoringService.scoreDocument(doc.getContent())).thenThrow(new RuntimeException("AI service unavailable"));
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Should have retried 3 times
+        verify(scoringService, times(3)).scoreDocument(doc.getContent());
+        // Should have saved to DLQ
+        ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
+        verify(deadLetterQueueRepo).save(dlqCaptor.capture());
+        DeadLetterQueue dlq = dlqCaptor.getValue();
+        assertEquals("SCORE", dlq.getStep());
+        assertEquals(rawDocId, dlq.getRawDocumentId());
+        assertEquals("PENDING", dlq.getStatus());
+        assertEquals(3, dlq.getRetryCount());
+        assertTrue(dlq.getErrorMessage().contains("AI service unavailable"));
+    }
+
+    @Test
+    void processDocument_shouldSucceedOnRetry() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        // First call fails, second succeeds
+        when(scoringService.scoreDocument(doc.getContent()))
+                .thenThrow(new RuntimeException("Transient error"))
+                .thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Should have called scoreDocument twice (1 fail + 1 success)
+        verify(scoringService, times(2)).scoreDocument(doc.getContent());
+        // Should NOT have saved to DLQ
+        verify(deadLetterQueueRepo, never()).save(any());
+    }
+
+    @Test
+    void processDocument_shouldSaveDlqForEntityExtractionFailure() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenThrow(new RuntimeException("Extraction failed"));
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        verify(aiClient, times(3)).extractEntities(doc.getContent());
+        ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
+        verify(deadLetterQueueRepo).save(dlqCaptor.capture());
+        assertEquals("ENTITY_EXTRACTION", dlqCaptor.getValue().getStep());
+    }
+
+    @Test
+    void retryDeadLetter_shouldRetryAndMarkResolved() {
+        UUID dlqId = UUID.randomUUID();
+        DeadLetterQueue dlq = DeadLetterQueue.builder()
+                .id(dlqId)
+                .rawDocumentId(rawDocId)
+                .step("SCORE")
+                .errorMessage("AI service unavailable")
+                .retryCount(3)
+                .maxRetries(3)
+                .status("PENDING")
+                .build();
+
+        when(deadLetterQueueRepo.findById(dlqId)).thenReturn(Optional.of(dlq));
+        when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
+
+        // Mock successful pipeline execution
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.retryDeadLetter(dlqId);
+
+        ArgumentCaptor<DeadLetterQueue> captor = ArgumentCaptor.forClass(DeadLetterQueue.class);
+        verify(deadLetterQueueRepo, atLeast(2)).save(captor.capture());
+        List<DeadLetterQueue> saved = captor.getAllValues();
+        // First save sets RETRYING, last save should set RESOLVED
+        assertEquals("RESOLVED", saved.get(saved.size() - 1).getStatus());
+    }
+
+    @Test
+    void retryDeadLetter_shouldThrowWhenNotFound() {
+        UUID dlqId = UUID.randomUUID();
+        when(deadLetterQueueRepo.findById(dlqId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class,
+                () -> pipelineService.retryDeadLetter(dlqId));
+    }
+
+    @Test
+    void retryDeadLetter_shouldThrowWhenStatusNotRetryable() {
+        UUID dlqId = UUID.randomUUID();
+        DeadLetterQueue dlq = DeadLetterQueue.builder()
+                .id(dlqId).status("RESOLVED").build();
+
+        when(deadLetterQueueRepo.findById(dlqId)).thenReturn(Optional.of(dlq));
+
+        assertThrows(IllegalStateException.class,
+                () -> pipelineService.retryDeadLetter(dlqId));
+    }
+
+    // ===== P0-1: Entity sub-type persistence =====
+
+    @Test
+    void processDocument_shouldPersistEntitySubType() {
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        ArgumentCaptor<KgNode> captor = ArgumentCaptor.forClass(KgNode.class);
+        verify(kgNodeRepo, atLeast(2)).save(captor.capture());
+        List<KgNode> savedNodes = captor.getAllValues();
+        // Java entity should have sub-type TECH
+        savedNodes.stream()
+                .filter(n -> "Java".equals(n.getName()))
+                .forEach(n -> assertEquals("TECH", n.getEntitySubType()));
+        // Sun Microsystems entity should have sub-type ORG
+        savedNodes.stream()
+                .filter(n -> "Sun Microsystems".equals(n.getName()))
+                .forEach(n -> assertEquals("ORG", n.getEntitySubType()));
+    }
+
+    // ===== P0-2: Entity-entity edges =====
+
+    @Test
+    void processDocument_shouldCreateEntityEntityEdges() {
+        KgNode javaNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
+        KgNode sunNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Sun Microsystems").nodeType(NodeType.ENTITY).build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(javaNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.of(sunNode));
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(javaNode));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
+        when(kgEdgeRepo.save(any(KgEdge.class))).thenAnswer(i -> i.getArgument(0));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Should create: Java→Sun, Sun→Java (entity-entity) + OOP→Java (concept-entity) = at least 3
+        verify(kgEdgeRepo, atLeast(3)).save(any(KgEdge.class));
+    }
+
+    // ===== P1-4: Update existing node description =====
+
+    @Test
+    void processDocument_shouldUpdateExistingNodeDescriptionWhenRicher() {
+        KgNode existingNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY)
+                .description("Old brief desc").build();
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            if (n.getId() == null) n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // The existing Java node should have been saved with updated description
+        ArgumentCaptor<KgNode> captor = ArgumentCaptor.forClass(KgNode.class);
+        verify(kgNodeRepo, atLeast(2)).save(captor.capture());
+        captor.getAllValues().stream()
+                .filter(n -> "Java".equals(n.getName()) && n.getId().equals(existingNode.getId()))
+                .forEach(n -> assertEquals("Programming language", n.getDescription()));
+    }
+
+    // ===== P1-5: Case-insensitive matching for concept related entities =====
+
+    @Test
+    void processDocument_shouldMatchRelatedEntitiesCaseInsensitively() {
+        KgNode entityNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("JAVA").nodeType(NodeType.ENTITY).build();
+        KgNode conceptNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("OOP").nodeType(NodeType.CONCEPT).build();
+
+        // Concept references "Java" (mixed case) but entity is stored as "JAVA" (upper case)
+        ExtractionResult caseSensitiveConcepts = new ExtractionResult();
+        caseSensitiveConcepts.setEntities(Collections.emptyList());
+        caseSensitiveConcepts.setConcepts(List.of(
+                new ConceptInfo("OOP", "Object-Oriented", List.of("Java"))));
+
+        when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
+        when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
+        when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
+        when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
+        when(aiClient.extractConcepts(doc.getContent())).thenReturn(caseSensitiveConcepts);
+        when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        // Case-insensitive match: "Java" should find "JAVA"
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
+        when(kgEdgeRepo.save(any(KgEdge.class))).thenAnswer(i -> i.getArgument(0));
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
+        when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+
+        pipelineService.processDocument(rawDocId);
+
+        // Edge should be created via case-insensitive match
+        verify(kgEdgeRepo, atLeast(1)).save(any(KgEdge.class));
     }
 }
