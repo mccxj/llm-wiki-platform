@@ -276,6 +276,7 @@ public class PipelineService {
                         .name(entity.getName())
                         .nodeType(NodeType.ENTITY)
                         .description(description)
+                        .entitySubType(entity.getType())
                         .build());
                 embedAndSave(node);
                 matched.add(node);
