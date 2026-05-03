@@ -61,6 +61,7 @@ public class PipelineService {
     private final AiApiClient aiClient;
     private final EmbeddingClient embeddingClient;
     private final ScoringService scoringService;
+    private final com.llmwiki.service.example.EntityExampleService entityExampleService;
 
     @Transactional
     public void processDocument(UUID rawDocId) {
@@ -242,11 +243,15 @@ public class PipelineService {
     }
 
     private ExtractionResult extractEntities(RawDocument doc) {
-        return aiClient.extractEntities(doc.getContent());
+        List<com.llmwiki.adapter.dto.ExampleData> examples =
+                entityExampleService.loadExamplesAsExampleData(null);
+        return aiClient.extractEntities(doc.getContent(), examples);
     }
 
     private ExtractionResult extractConcepts(RawDocument doc) {
-        return aiClient.extractConcepts(doc.getContent());
+        List<com.llmwiki.adapter.dto.ExampleData> examples =
+                entityExampleService.loadExamplesAsExampleData(null);
+        return aiClient.extractConcepts(doc.getContent(), examples);
     }
 
     private List<KgNode> matchKnowledgeGraph(ExtractionResult entities, ExtractionResult concepts) {

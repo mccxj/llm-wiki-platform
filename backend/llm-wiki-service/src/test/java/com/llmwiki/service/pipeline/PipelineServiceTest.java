@@ -23,6 +23,7 @@ import com.llmwiki.domain.pipeline.repository.DeadLetterQueueRepository;
 import com.llmwiki.domain.processing.repository.ProcessingLogRepository;
 import com.llmwiki.domain.sync.entity.RawDocument;
 import com.llmwiki.domain.sync.repository.RawDocumentRepository;
+import com.llmwiki.service.example.EntityExampleService;
 import com.llmwiki.service.scoring.ScoringService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +57,7 @@ class PipelineServiceTest {
     @Mock AiApiClient aiClient;
     @Mock EmbeddingClient embeddingClient;
     @Mock ScoringService scoringService;
+    @Mock EntityExampleService entityExampleService;
 
     @InjectMocks
     PipelineService pipelineService;
@@ -91,6 +93,8 @@ class PipelineServiceTest {
         concepts.setEntities(Collections.emptyList());
         concepts.setConcepts(List.of(
                 new ConceptInfo("OOP", "Object-Oriented", List.of("Java"))));
+
+        lenient().when(entityExampleService.loadExamplesAsExampleData(any())).thenReturn(Collections.emptyList());
     }
 
     @Test
@@ -119,8 +123,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
@@ -131,6 +135,7 @@ class PipelineServiceTest {
         });
         when(embeddingClient.embed(any())).thenReturn(new float[1536]);
         when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
         when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
             Page p = i.getArgument(0);
@@ -143,8 +148,8 @@ class PipelineServiceTest {
         pipelineService.processDocument(rawDocId);
 
         verify(scoringService).scoreDocument(doc.getContent());
-        verify(aiClient).extractEntities(doc.getContent());
-        verify(aiClient).extractConcepts(doc.getContent());
+        verify(aiClient).extractEntities(eq(doc.getContent()), anyList());
+        verify(aiClient).extractConcepts(eq(doc.getContent()), anyList());
         verify(kgNodeRepo, atLeast(3)).save(any(KgNode.class));
         verify(pageRepo, atLeast(1)).save(any(Page.class));
         verify(approvalQueueRepo).save(any());
@@ -160,8 +165,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
@@ -200,8 +205,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
@@ -242,8 +247,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));
@@ -253,7 +258,9 @@ class PipelineServiceTest {
             return n;
         });
         when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(entityNode));
+        when(kgNodeRepo.findByNameIgnoreCaseAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgEdgeRepo.findBySourceNodeId(conceptNode.getId())).thenReturn(List.of(existingEdge));
+        when(kgEdgeRepo.findBySourceNodeId(entityNode.getId())).thenReturn(List.of());
         when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
         when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
             Page p = i.getArgument(0);
@@ -274,8 +281,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
@@ -316,8 +323,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
@@ -375,18 +382,32 @@ class PipelineServiceTest {
     void processDocument_shouldSucceedOnRetry() {
         when(rawDocRepo.findById(rawDocId)).thenReturn(Optional.of(doc));
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
-        // First call fails, second succeeds
         when(scoringService.scoreDocument(doc.getContent()))
                 .thenThrow(new RuntimeException("Transient error"))
                 .thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
+        when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
+        when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
+            KgNode n = i.getArgument(0);
+            n.setId(UUID.randomUUID());
+            return n;
+        });
+        when(embeddingClient.embed(any())).thenReturn(new float[1536]);
+        when(kgEdgeRepo.findBySourceNodeId(any(UUID.class))).thenReturn(List.of());
+        when(pageRepo.findBySlug(any())).thenReturn(Optional.empty());
+        when(pageRepo.save(any(Page.class))).thenAnswer(i -> {
+            Page p = i.getArgument(0);
+            p.setId(UUID.randomUUID());
+            return p;
+        });
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
+        when(approvalQueueRepo.save(any())).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.processDocument(rawDocId);
 
-        // Should have called scoreDocument twice (1 fail + 1 success)
         verify(scoringService, times(2)).scoreDocument(doc.getContent());
-        // Should NOT have saved to DLQ
         verify(deadLetterQueueRepo, never()).save(any());
     }
 
@@ -396,13 +417,13 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenThrow(new RuntimeException("Extraction failed"));
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenThrow(new RuntimeException("Extraction failed"));
         when(procLogRepo.save(any())).thenAnswer(i -> i.getArgument(0));
         when(deadLetterQueueRepo.save(any(DeadLetterQueue.class))).thenAnswer(i -> i.getArgument(0));
 
         pipelineService.processDocument(rawDocId);
 
-        verify(aiClient, times(3)).extractEntities(doc.getContent());
+        verify(aiClient, times(3)).extractEntities(eq(doc.getContent()), anyList());
         ArgumentCaptor<DeadLetterQueue> dlqCaptor = ArgumentCaptor.forClass(DeadLetterQueue.class);
         verify(deadLetterQueueRepo).save(dlqCaptor.capture());
         assertEquals("ENTITY_EXTRACTION", dlqCaptor.getValue().getStep());
@@ -469,8 +490,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType(any(), any())).thenReturn(Optional.empty());
         when(kgNodeRepo.save(any(KgNode.class))).thenAnswer(i -> {
             KgNode n = i.getArgument(0);
@@ -516,8 +537,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(javaNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.of(sunNode));
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
@@ -556,8 +577,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(concepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(concepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.of(existingNode));
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.empty());
@@ -606,8 +627,8 @@ class PipelineServiceTest {
         when(configRepo.findByKey("pipeline.max.retries")).thenReturn(Optional.empty());
         when(scoringService.scoreDocument(doc.getContent())).thenReturn(scoreResult);
         when(scoringService.passesThreshold(scoreResult)).thenReturn(true);
-        when(aiClient.extractEntities(doc.getContent())).thenReturn(entities);
-        when(aiClient.extractConcepts(doc.getContent())).thenReturn(caseSensitiveConcepts);
+        when(aiClient.extractEntities(eq(doc.getContent()), anyList())).thenReturn(entities);
+        when(aiClient.extractConcepts(eq(doc.getContent()), anyList())).thenReturn(caseSensitiveConcepts);
         when(kgNodeRepo.findByNameAndNodeType("Java", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("Sun Microsystems", NodeType.ENTITY)).thenReturn(Optional.empty());
         when(kgNodeRepo.findByNameAndNodeType("OOP", NodeType.CONCEPT)).thenReturn(Optional.of(conceptNode));

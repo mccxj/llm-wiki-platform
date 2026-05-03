@@ -91,10 +91,13 @@ public class OpenAiApiClient implements AiApiClient {
             2. Key concepts (abstract ideas or topics) with description.
             3. Relations between entities: how entities relate to each other.
 
+            For each entity and concept, provide the character position (start_offset, end_offset) where it
+            appears in the source text. If it appears multiple times, use the first occurrence.
+
             Respond in JSON format:
             {
-              "entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","related_entities":["other_entity"]}],
-              "concepts":[{"name":"concept_name","description":"brief description","related_entities":["entity1"]}],
+              "entities":[{"name":"entity_name","type":"PERSON|ORG|TECH|TOOL|OTHER","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["other_entity"]}],
+              "concepts":[{"name":"concept_name","description":"brief description","start_offset":0,"end_offset":10,"related_entities":["entity1"]}],
               "relations":[{"source_entity":"EntityA","target_entity":"EntityB","relation_type":"USES|PART_OF|RELATED_TO|LOCATED_IN","confidence":0.95}]
             }
             """;
@@ -336,12 +339,14 @@ public class OpenAiApiClient implements AiApiClient {
     @Override
     public UnifiedExtractionResult unifiedExtract(String content) {
         try {
-            List<String> chunks = splitIntoChunks(content, 7000);
+            List<TextChunk> textChunks = chunker.chunk(content);
             List<UnifiedExtractionResult.EntityInfo> allEntities = new ArrayList<>();
             List<UnifiedExtractionResult.ConceptInfo> allConcepts = new ArrayList<>();
             List<UnifiedExtractionResult.RelationInfo> allRelations = new ArrayList<>();
+            int extractionIdx = 0;
 
-            for (String chunk : chunks) {
+            for (TextChunk textChunk : textChunks) {
+                String chunk = textChunk.getText();
                 String response = callApi(unifiedSystemPrompt, chunk);
                 JsonNode root = MAPPER.readTree(response);
 
@@ -349,11 +354,19 @@ public class OpenAiApiClient implements AiApiClient {
                 if (entitiesNode != null && entitiesNode.isArray()) {
                     for (JsonNode node : entitiesNode) {
                         List<String> related = parseStringListFromNode(node, "related_entities");
-                        allEntities.add(new UnifiedExtractionResult.EntityInfo(
+                        UnifiedExtractionResult.EntityInfo entity = new UnifiedExtractionResult.EntityInfo(
                                 node.get("name").asText(),
                                 node.get("type").asText(),
                                 node.has("description") ? node.get("description").asText() : "",
-                                related));
+                                related);
+
+                        if (node.has("start_offset") && node.has("end_offset")) {
+                            entity.setStartOffset(node.get("start_offset").asInt());
+                            entity.setEndOffset(node.get("end_offset").asInt());
+                            entity.setAlignmentStatus(AlignmentStatus.EXACT);
+                        }
+                        entity.setExtractionIndex(extractionIdx++);
+                        allEntities.add(entity);
                     }
                 }
 
@@ -361,10 +374,18 @@ public class OpenAiApiClient implements AiApiClient {
                 if (conceptsNode != null && conceptsNode.isArray()) {
                     for (JsonNode node : conceptsNode) {
                         List<String> related = parseStringListFromNode(node, "related_entities");
-                        allConcepts.add(new UnifiedExtractionResult.ConceptInfo(
+                        UnifiedExtractionResult.ConceptInfo concept = new UnifiedExtractionResult.ConceptInfo(
                                 node.get("name").asText(),
                                 node.has("description") ? node.get("description").asText() : "",
-                                related));
+                                related);
+
+                        if (node.has("start_offset") && node.has("end_offset")) {
+                            concept.setStartOffset(node.get("start_offset").asInt());
+                            concept.setEndOffset(node.get("end_offset").asInt());
+                            concept.setAlignmentStatus(AlignmentStatus.EXACT);
+                        }
+                        concept.setExtractionIndex(extractionIdx++);
+                        allConcepts.add(concept);
                     }
                 }
 
@@ -394,9 +415,37 @@ public class OpenAiApiClient implements AiApiClient {
                 if (!dedupedConcepts.containsKey(key)) dedupedConcepts.put(key, c);
             }
 
+            List<UnifiedExtractionResult.EntityInfo> finalEntities = new ArrayList<>();
+            for (UnifiedExtractionResult.EntityInfo e : dedupedEntities.values()) {
+                if (e.getStartOffset() == null) {
+                    AlignmentResolver.AlignmentResult aligned =
+                            alignmentResolver.alignEntity(e.getName(), content);
+                    if (aligned != null) {
+                        e.setStartOffset(aligned.getStartOffset());
+                        e.setEndOffset(aligned.getEndOffset());
+                        e.setAlignmentStatus(aligned.getStatus());
+                    }
+                }
+                finalEntities.add(e);
+            }
+
+            List<UnifiedExtractionResult.ConceptInfo> finalConcepts = new ArrayList<>();
+            for (UnifiedExtractionResult.ConceptInfo c : dedupedConcepts.values()) {
+                if (c.getStartOffset() == null) {
+                    AlignmentResolver.AlignmentResult aligned =
+                            alignmentResolver.alignEntity(c.getName(), content);
+                    if (aligned != null) {
+                        c.setStartOffset(aligned.getStartOffset());
+                        c.setEndOffset(aligned.getEndOffset());
+                        c.setAlignmentStatus(aligned.getStatus());
+                    }
+                }
+                finalConcepts.add(c);
+            }
+
             UnifiedExtractionResult result = new UnifiedExtractionResult();
-            result.setEntities(new ArrayList<>(dedupedEntities.values()));
-            result.setConcepts(new ArrayList<>(dedupedConcepts.values()));
+            result.setEntities(finalEntities);
+            result.setConcepts(finalConcepts);
             result.setRelations(allRelations);
             return result;
         } catch (Exception e) {
@@ -589,21 +638,6 @@ public class OpenAiApiClient implements AiApiClient {
             log.error("Failed to extract concepts with temperature {}", temperature, e);
             return new ExtractionResult();
         }
-    }
-
-    private List<String> splitIntoChunks(String content, int maxChunkSize) {
-        List<String> chunks = new ArrayList<>();
-        if (content == null || content.isEmpty()) {
-            chunks.add("");
-            return chunks;
-        }
-        int start = 0;
-        while (start < content.length()) {
-            int end = Math.min(start + maxChunkSize, content.length());
-            chunks.add(content.substring(start, end));
-            start = end;
-        }
-        return chunks;
     }
 
     private List<String> parseStringList(JsonNode root, String field) {

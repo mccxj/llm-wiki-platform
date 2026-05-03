@@ -1,5 +1,7 @@
 package com.llmwiki.adapter.dto;
 
+import com.llmwiki.common.enums.AlignmentStatus;
+
 import java.util.List;
 
 public class UnifiedExtractionResult {
@@ -21,6 +23,10 @@ public class UnifiedExtractionResult {
         private String type;
         private String description;
         private List<String> relatedEntities;
+        private Integer startOffset;
+        private Integer endOffset;
+        private AlignmentStatus alignmentStatus;
+        private Integer extractionIndex;
 
         public EntityInfo() {}
         public EntityInfo(String name, String type, String description, List<String> relatedEntities) {
@@ -34,12 +40,24 @@ public class UnifiedExtractionResult {
         public void setDescription(String description) { this.description = description; }
         public List<String> getRelatedEntities() { return relatedEntities; }
         public void setRelatedEntities(List<String> relatedEntities) { this.relatedEntities = relatedEntities; }
+        public Integer getStartOffset() { return startOffset; }
+        public void setStartOffset(Integer startOffset) { this.startOffset = startOffset; }
+        public Integer getEndOffset() { return endOffset; }
+        public void setEndOffset(Integer endOffset) { this.endOffset = endOffset; }
+        public AlignmentStatus getAlignmentStatus() { return alignmentStatus; }
+        public void setAlignmentStatus(AlignmentStatus alignmentStatus) { this.alignmentStatus = alignmentStatus; }
+        public Integer getExtractionIndex() { return extractionIndex; }
+        public void setExtractionIndex(Integer extractionIndex) { this.extractionIndex = extractionIndex; }
     }
 
     public static class ConceptInfo {
         private String name;
         private String description;
         private List<String> relatedEntities;
+        private Integer startOffset;
+        private Integer endOffset;
+        private AlignmentStatus alignmentStatus;
+        private Integer extractionIndex;
 
         public ConceptInfo() {}
         public ConceptInfo(String name, String description, List<String> relatedEntities) {
@@ -51,6 +69,14 @@ public class UnifiedExtractionResult {
         public void setDescription(String description) { this.description = description; }
         public List<String> getRelatedEntities() { return relatedEntities; }
         public void setRelatedEntities(List<String> relatedEntities) { this.relatedEntities = relatedEntities; }
+        public Integer getStartOffset() { return startOffset; }
+        public void setStartOffset(Integer startOffset) { this.startOffset = startOffset; }
+        public Integer getEndOffset() { return endOffset; }
+        public void setEndOffset(Integer endOffset) { this.endOffset = endOffset; }
+        public AlignmentStatus getAlignmentStatus() { return alignmentStatus; }
+        public void setAlignmentStatus(AlignmentStatus alignmentStatus) { this.alignmentStatus = alignmentStatus; }
+        public Integer getExtractionIndex() { return extractionIndex; }
+        public void setExtractionIndex(Integer extractionIndex) { this.extractionIndex = extractionIndex; }
     }
 
     public static class RelationInfo {
@@ -72,5 +98,15 @@ public class UnifiedExtractionResult {
         public void setRelationType(String relationType) { this.relationType = relationType; }
         public Double getConfidence() { return confidence; }
         public void setConfidence(Double confidence) { this.confidence = confidence; }
+
+        /** Returns true if confidence is above the given threshold. */
+        public boolean isConfident(double threshold) {
+            return confidence != null && confidence >= threshold;
+        }
+
+        /** Returns true if this relation has a valid structured type. */
+        public boolean hasValidType() {
+            return relationType != null && !relationType.isBlank();
+        }
     }
 }
