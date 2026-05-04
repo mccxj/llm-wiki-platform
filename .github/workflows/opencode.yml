@@ -27,7 +27,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          persist-credentials: true
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -38,16 +38,23 @@ jobs:
           code-review-graph install --platform opencode
       - name: Build code-review-graph
         run: code-review-graph build
-      - name: Setup configuration
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+      - name: Install dependencies
+        run: npm ci
+      - name: Configure Git identity
         run: |
-          mkdir -p ~/.config/opencode
-          curl -sL https://gist.githubusercontent.com/mccxj/c23c72d3b4e891dd36866c2b32eda3d8/raw/AGENTS.md -o ~/.config/opencode/AGENTS.md
-          curl -sL https://gist.githubusercontent.com/mccxj/1d5e8c7f107af7db59a2c2ace6bd949c/raw/opencode.jsonc -o ~/.config/opencode/opencode.jsonc
-          curl -sL https://gist.githubusercontent.com/mccxj/6698d7e99d2eda81602fd276e03a200d/raw/oh-my-openagent.json -o ~/.config/opencode/oh-my-openagent.json
+          git config --global user.name "opencode-agent[bot]"
+          git config --global user.email "opencode-agent[bot]@users.noreply.github.com"
+      - name: Setup agent
+        uses: tee-labs/agent-standby@latest
       - name: Run opencode
         uses: anomalyco/opencode/github@latest
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           API_KEY: ${{ secrets.API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
