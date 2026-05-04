@@ -13,7 +13,8 @@ public class KgVector {
     @Id
     private UUID nodeId;
 
-    @Column(nullable = false, columnDefinition = "vector(1536)")
+    @Lob
+    @Column(nullable = false)
     private float[] vector;
 
     private String model;

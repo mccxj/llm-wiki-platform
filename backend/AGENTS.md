@@ -41,6 +41,8 @@ llm-wiki-web → llm-wiki-service → llm-wiki-domain → llm-wiki-common
 - **Adapter pattern:** AI clients implement interfaces in `adapter/api/`. Controller → Service → Adapter — never call adapters from controllers directly.
 - **Flyway:** `V{version}__description.sql` in `db/migration/`. No `ddl-auto` changes.
 - **Tests:** H2 in-memory DB. Main profile uses PostgreSQL + pgvector.
+- **H2 compat notes:** `KgVector.vector` uses `@Lob` (not `columnDefinition="vector(1536)"`) for H2 compatibility. `SystemConfig.value` uses quoted column name `"value"` to avoid H2 reserved keyword conflict.
+- **Test coverage (2026-05-04):** Added 17 new test classes covering all previously untested repositories, controllers, DTOs, and services. All 453 tests pass across all 5 modules.
 
 ## ANTI-PATTERNS
 

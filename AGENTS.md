@@ -1,6 +1,7 @@
 # LLM Wiki Platform — Knowledge Base
 
 **Generated:** 2026-05-01
+**Updated:** 2026-05-04 (test coverage improvements)
 **Stack:** Java 17 + Spring Boot 3.2 + React 18 + TypeScript + PostgreSQL + pgvector
 
 ## Overview
@@ -103,6 +104,8 @@ All externalized via `application.yml` env vars:
 - `code-review-graph` MCP is installed — use `detect_changes`, `query_graph`, `get_impact_radius` before manual grep for code review
 - Spring Boot scans `com.llmwiki` base package; JPA repositories and entities are in `com.llmwiki.domain`
 - Tests use H2 in-memory DB; main profile uses PostgreSQL + pgvector
+- **Test coverage**: All repository integration tests added (17 new test classes, ~120 new test methods). Key gaps filled: ApprovalAuditRepository, ApprovalQueueRepository, AuditLogRepository, KgNodeRepository, KgEdgeRepository, KgVectorRepository, PageRepository, PageLinkRepository, PageTagRepository, ProcessingLogRepository, RawDocumentRepository, WikiSourceRepository, SyncLogRepository, SystemConfigRepository, MaintenanceReportLogRepository, WikiSourceAdapterFactory, PageController, RawDocumentDTO.
+- **H2 compat**: `KgVector.vector` uses `@Lob` instead of `columnDefinition="vector(1536)"` for H2 test compatibility. `SystemConfig.value` uses quoted column name `"value"` to avoid H2 reserved keyword conflict.
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
