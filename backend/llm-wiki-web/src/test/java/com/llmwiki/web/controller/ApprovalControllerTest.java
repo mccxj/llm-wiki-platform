@@ -112,4 +112,73 @@ class ApprovalControllerTest {
 
         assertEquals(404, response.getStatusCodeValue());
     }
+
+    @Test
+    void batch_shouldApproveMultiple() {
+        UUID id1 = UUID.randomUUID();
+        UUID id2 = UUID.randomUUID();
+        when(approvalService.approve(eq(id1), eq("admin"), eq("batch approve")))
+                .thenReturn(ApprovalQueue.builder().id(id1).build());
+        when(approvalService.approve(eq(id2), eq("admin"), eq("batch approve")))
+                .thenReturn(ApprovalQueue.builder().id(id2).build());
+
+        var response = controller.batch(Map.of(
+                "ids", List.of(id1.toString(), id2.toString()),
+                "action", "approve",
+                "comment", "batch approve",
+                "reviewerId", "admin"));
+
+        assertEquals(200, response.getStatusCodeValue());
+        Map<String, Object> body = response.getBody();
+        assertEquals(2, body.get("success"));
+        assertEquals(0, body.get("failed"));
+    }
+
+    @Test
+    void batch_shouldRejectMultiple() {
+        UUID id1 = UUID.randomUUID();
+        when(approvalService.reject(eq(id1), eq("admin"), eq("batch reject")))
+                .thenReturn(ApprovalQueue.builder().id(id1).build());
+
+        var response = controller.batch(Map.of(
+                "ids", List.of(id1.toString()),
+                "action", "reject",
+                "comment", "batch reject"));
+
+        assertEquals(200, response.getStatusCodeValue());
+        Map<String, Object> body = response.getBody();
+        assertEquals(1, body.get("success"));
+    }
+
+    @Test
+    void batch_shouldHandlePartialFailures() {
+        UUID id1 = UUID.randomUUID();
+        UUID id2 = UUID.randomUUID();
+        when(approvalService.approve(eq(id1), eq("admin"), eq("")))
+                .thenReturn(ApprovalQueue.builder().id(id1).build());
+        when(approvalService.approve(eq(id2), eq("admin"), eq("")))
+                .thenThrow(new RuntimeException("Not found"));
+
+        var response = controller.batch(Map.of(
+                "ids", List.of(id1.toString(), id2.toString()),
+                "action", "approve"));
+
+        assertEquals(200, response.getStatusCodeValue());
+        Map<String, Object> body = response.getBody();
+        assertEquals(1, body.get("success"));
+        assertEquals(1, body.get("failed"));
+    }
+
+    @Test
+    void history_shouldReturnApprovalHistory() {
+        UUID pageId = UUID.randomUUID();
+        List<ApprovalQueue> history = List.of(
+                ApprovalQueue.builder().id(UUID.randomUUID()).pageId(pageId).build());
+        when(approvalService.getApprovalHistory(pageId)).thenReturn(history);
+
+        var response = controller.history(pageId, 0, 20);
+
+        assertEquals(200, response.getStatusCodeValue());
+        assertEquals(1, response.getBody().size());
+    }
 }

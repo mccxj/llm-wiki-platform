@@ -348,4 +348,76 @@ class SearchServiceTest {
         assertNotNull(result);
         verify(aiClient).chat(anyString(), eq("test"));
     }
+
+    @Test
+    void search_shouldApplyOffsetAndLimit() {
+        float[] queryEmbedding = new float[1536];
+        UUID nodeId2 = UUID.randomUUID();
+        KgNode node2 = KgNode.builder()
+                .id(nodeId2).name("Python").nodeType(NodeType.ENTITY)
+                .description("Python language").build();
+
+        Object[] row1 = {nodeId, 0.3};
+        Object[] row2 = {nodeId2, 0.5};
+
+        when(embeddingClient.embed("test")).thenReturn(queryEmbedding);
+        setupVectorSearch(java.util.Arrays.asList(row1, row2));
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
+        when(nodeRepo.findById(nodeId2)).thenReturn(Optional.of(node2));
+        when(pageRepo.findById(pageId)).thenReturn(Optional.of(page));
+
+        SearchRequest request = SearchRequest.builder()
+                .query("test").limit(1).offset(1).build();
+        List<SearchService.SearchResult> results = searchService.search(request);
+
+        assertEquals(1, results.size());
+        assertEquals("Python", results.get(0).nodeName);
+    }
+
+    @Test
+    void search_shouldReturnAllWhenOffsetExceedsResults() {
+        float[] queryEmbedding = new float[1536];
+        Object[] row = {nodeId, 0.3};
+
+        when(embeddingClient.embed("test")).thenReturn(queryEmbedding);
+        setupVectorSearch(java.util.Collections.singletonList(row));
+        when(nodeRepo.findById(nodeId)).thenReturn(Optional.of(node));
+
+        SearchRequest request = SearchRequest.builder()
+                .query("test").limit(10).offset(5).build();
+        List<SearchService.SearchResult> results = searchService.search(request);
+
+        assertEquals(1, results.size());
+    }
+
+    @Test
+    void searchByTag_shouldReturnEmptyForNoMatch() {
+        when(pageTagRepo.findByTagIgnoreCase("nonexistent")).thenReturn(List.of());
+        when(nodeRepo.findByNameContaining("nonexistent")).thenReturn(List.of());
+
+        List<SearchService.SearchResult> results = searchService.searchByTag("nonexistent", 20);
+
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void searchByTag_shouldDeduplicateResults() {
+        UUID tagPageId = UUID.randomUUID();
+        PageTag pageTag = PageTag.builder().pageId(tagPageId).tag("java").build();
+        KgNode taggedNode = KgNode.builder()
+                .id(UUID.randomUUID()).name("Spring").nodeType(NodeType.ENTITY)
+                .description("Spring framework").pageId(tagPageId).build();
+        Page taggedPage = Page.builder()
+                .id(tagPageId).title("Spring Framework").slug("spring")
+                .content("Spring is a framework...").status(PageStatus.APPROVED).build();
+
+        when(pageTagRepo.findByTagIgnoreCase("java")).thenReturn(List.of(pageTag));
+        when(pageRepo.findById(tagPageId)).thenReturn(Optional.of(taggedPage));
+        when(nodeRepo.findAll()).thenReturn(List.of(taggedNode));
+
+        List<SearchService.SearchResult> results = searchService.searchByTag("java", 20);
+
+        long distinctCount = results.stream().distinct().count();
+        assertEquals(results.size(), distinctCount);
+    }
 }

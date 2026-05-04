@@ -1,5 +1,7 @@
 package com.llmwiki.service.maintenance;
 
+import com.llmwiki.common.enums.NodeType;
+import com.llmwiki.domain.graph.entity.KgNode;
 import com.llmwiki.domain.graph.repository.KgEdgeRepository;
 import com.llmwiki.domain.graph.repository.KgNodeRepository;
 import com.llmwiki.domain.page.entity.Page;
@@ -11,8 +13,11 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -242,5 +247,185 @@ class MaintenanceServiceTest {
         verify(kgEdgeRepo, never()).findAll();
         verify(pageRepo, never()).findAll();
         verify(kgNodeRepo, never()).findAll();
+    }
+
+    @Test
+    void findStalePagesShouldReturnPagesOlderThanCutoff() {
+        Page stalePage = Page.builder()
+                .id(UUID.randomUUID()).title("Old Page")
+                .slug("old-page").content("Old content")
+                .updatedAt(Instant.now().minus(60, ChronoUnit.DAYS))
+                .build();
+        Page recentPage = Page.builder()
+                .id(UUID.randomUUID()).title("Recent Page")
+                .slug("recent-page").content("Recent content")
+                .updatedAt(Instant.now().minus(5, ChronoUnit.DAYS))
+                .build();
+
+        when(pageRepo.findAll()).thenReturn(List.of(stalePage, recentPage));
+
+        List<Page> result = maintenanceService.findStalePages(30);
+
+        assertEquals(1, result.size());
+        assertEquals("Old Page", result.get(0).getTitle());
+    }
+
+    @Test
+    void findStalePagesShouldReturnEmptyForNoStalePages() {
+        Page recentPage = Page.builder()
+                .id(UUID.randomUUID()).title("Recent")
+                .slug("recent").content("content")
+                .updatedAt(Instant.now().minus(1, ChronoUnit.DAYS))
+                .build();
+
+        when(pageRepo.findAll()).thenReturn(List.of(recentPage));
+
+        assertTrue(maintenanceService.findStalePages(30).isEmpty());
+    }
+
+    @Test
+    void findStalePagesShouldHandleNullUpdatedAt() {
+        Page nullTimePage = Page.builder()
+                .id(UUID.randomUUID()).title("Null Time")
+                .slug("null-time").content("content")
+                .updatedAt(null)
+                .build();
+
+        when(pageRepo.findAll()).thenReturn(List.of(nullTimePage));
+
+        assertTrue(maintenanceService.findStalePages(30).isEmpty());
+    }
+
+    @Test
+    void findContradictionsShouldReturnContestedPages() {
+        Page contestedPage = Page.builder()
+                .id(UUID.randomUUID()).title("Contested")
+                .slug("contested").content("content")
+                .contested(true)
+                .build();
+        Page normalPage = Page.builder()
+                .id(UUID.randomUUID()).title("Normal")
+                .slug("normal").content("content")
+                .contested(false)
+                .build();
+        Page nullContestedPage = Page.builder()
+                .id(UUID.randomUUID()).title("Null Contested")
+                .slug("null-contested").content("content")
+                .contested(null)
+                .build();
+
+        when(pageRepo.findAll()).thenReturn(List.of(contestedPage, normalPage, nullContestedPage));
+
+        List<Page> result = maintenanceService.findContradictions();
+
+        assertEquals(1, result.size());
+        assertEquals("Contested", result.get(0).getTitle());
+    }
+
+    @Test
+    void findContradictionsShouldReturnEmptyWhenNoContestedPages() {
+        Page normalPage = Page.builder()
+                .id(UUID.randomUUID()).title("Normal")
+                .slug("normal").content("content")
+                .contested(false)
+                .build();
+
+        when(pageRepo.findAll()).thenReturn(List.of(normalPage));
+
+        assertTrue(maintenanceService.findContradictions().isEmpty());
+    }
+
+    @Test
+    void indexConsistencyCheckShouldFindPagesWithoutNodes() {
+        UUID pageWithNodeId = UUID.randomUUID();
+        UUID pageWithoutNodeId = UUID.randomUUID();
+
+        KgNode node = KgNode.builder()
+                .id(UUID.randomUUID()).name("Node")
+                .nodeType(com.llmwiki.common.enums.NodeType.ENTITY)
+                .pageId(pageWithNodeId)
+                .build();
+        Page pageWithNode = Page.builder()
+                .id(pageWithNodeId).title("Has Node")
+                .slug("has-node").content("content")
+                .build();
+        Page pageWithoutNode = Page.builder()
+                .id(pageWithoutNodeId).title("No Node")
+                .slug("no-node").content("content")
+                .build();
+
+        when(kgNodeRepo.findAll()).thenReturn(List.of(node));
+        when(pageRepo.findAll()).thenReturn(List.of(pageWithNode, pageWithoutNode));
+        when(pageRepo.count()).thenReturn(2L);
+
+        Map<String, Object> result = maintenanceService.indexConsistencyCheck();
+
+        assertEquals(2L, result.get("totalPages"));
+        assertEquals(1, result.get("pagesWithoutNodes"));
+        List<String> orphanPages = (List<String>) result.get("orphanPages");
+        assertEquals(1, orphanPages.size());
+        assertEquals("No Node", orphanPages.get(0));
+    }
+
+    @Test
+    void indexConsistencyCheckShouldReturnAllMatchedWhenEveryPageHasNode() {
+        UUID pageId = UUID.randomUUID();
+        KgNode node = KgNode.builder()
+                .id(UUID.randomUUID()).name("Node")
+                .nodeType(com.llmwiki.common.enums.NodeType.ENTITY)
+                .pageId(pageId)
+                .build();
+        Page page = Page.builder()
+                .id(pageId).title("Page")
+                .slug("page").content("content")
+                .build();
+
+        when(kgNodeRepo.findAll()).thenReturn(List.of(node));
+        when(pageRepo.findAll()).thenReturn(List.of(page));
+        when(pageRepo.count()).thenReturn(1L);
+
+        Map<String, Object> result = maintenanceService.indexConsistencyCheck();
+
+        assertEquals(1L, result.get("totalPages"));
+        assertEquals(0, result.get("pagesWithoutNodes"));
+        assertTrue(((List<?>) result.get("orphanPages")).isEmpty());
+    }
+
+    @Test
+    void indexConsistencyCheckShouldHandleNodesWithNullPageId() {
+        KgNode nodeWithNullPageId = KgNode.builder()
+                .id(UUID.randomUUID()).name("No Page Node")
+                .nodeType(com.llmwiki.common.enums.NodeType.ENTITY)
+                .pageId(null)
+                .build();
+        Page page = Page.builder()
+                .id(UUID.randomUUID()).title("Orphan Page")
+                .slug("orphan-page").content("content")
+                .build();
+
+        when(kgNodeRepo.findAll()).thenReturn(List.of(nodeWithNullPageId));
+        when(pageRepo.findAll()).thenReturn(List.of(page));
+        when(pageRepo.count()).thenReturn(1L);
+
+        Map<String, Object> result = maintenanceService.indexConsistencyCheck();
+
+        assertEquals(1, result.get("pagesWithoutNodes"));
+    }
+
+    @Test
+    void generateReportShouldAggregateAllStats() {
+        when(pageRepo.count()).thenReturn(10L);
+        when(kgEdgeRepo.findConnectedPageIds()).thenReturn(List.of());
+        when(pageRepo.findOrphanPages(List.of())).thenReturn(List.of());
+        when(pageRepo.findAll()).thenReturn(List.of());
+
+        MaintenanceReport report = maintenanceService.generateReport();
+
+        assertNotNull(report.getGeneratedAt());
+        assertEquals(10L, report.getTotalPages());
+        assertEquals(0, report.getOrphanCount());
+        assertEquals(0, report.getStaleCount());
+        assertEquals(0, report.getDuplicateGroups());
+        assertEquals(0, report.getContradictionCount());
     }
 }

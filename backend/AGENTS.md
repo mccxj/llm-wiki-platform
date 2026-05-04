@@ -32,6 +32,15 @@ llm-wiki-web → llm-wiki-service → llm-wiki-domain → llm-wiki-common
 | App config | `llm-wiki-web/src/main/resources/application.yml` |
 | Spring Boot entry | `llm-wiki-web/src/main/java/com/llmwiki/web/LlmWikiApplication.java` |
 
+## HIERARCHY
+
+Each module has its own AGENTS.md:
+- `llm-wiki-common/AGENTS.md` — Enums, DTOs, zero-dependency foundation
+- `llm-wiki-adapter/AGENTS.md` — AI API clients, wiki adapters
+- `llm-wiki-domain/AGENTS.md` — JPA entities, repositories
+- `llm-wiki-service/AGENTS.md` — Business logic services
+- `llm-wiki-web/AGENTS.md` — Controllers, config, scheduler
+
 ## CONVENTIONS
 
 - **Package:** `com.llmwiki.{module}.{subdomain}` — module name matches the Maven artifact.
