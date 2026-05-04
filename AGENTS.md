@@ -1,6 +1,6 @@
 # LLM Wiki Platform — Knowledge Base
 
-**Generated:** 2026-05-01
+**Generated:** 2026-05-04
 **Stack:** Java 17 + Spring Boot 3.2 + React 18 + TypeScript + PostgreSQL + pgvector
 
 ## Overview
@@ -25,6 +25,13 @@ llm-wiki-platform/
 ├── Dockerfile               # Multi-stage: Maven build → JRE 17 runtime
 └── .github/workflows/       # OpenCode AI agent CI
 ```
+
+## HIERARCHY
+
+- `AGENTS.md` (this file) — Project overview, architecture, test coverage
+- `backend/AGENTS.md` — Backend module summary + hierarchy
+- `backend/llm-wiki-{common,adapter,domain,service,web}/AGENTS.md` — Per-module details
+- `frontend/AGENTS.md` — Frontend structure and conventions
 
 ## Where to Look
 
@@ -96,6 +103,28 @@ All externalized via `application.yml` env vars:
 - `DB_HOST`, `DB_USERNAME`, `DB_PASSWORD` — PostgreSQL
 - `AI_API_BASE_URL`, `AI_API_KEY`, `AI_MODEL` — OpenAI-compatible API
 - `EMBEDDING_MODEL`, `EMBEDDING_DIMENSION` — vector config (default: ada-002, 1536)
+
+## Test Coverage
+
+**Total: 528 tests across 5 modules (all passing)**
+
+| Module | Tests | Coverage Focus |
+|--------|-------|---------------|
+| `llm-wiki-common` | 48 | Enums, DTOs, scoring logic |
+| `llm-wiki-adapter` | 111 | AI API clients, embedding, wiki adapters |
+| `llm-wiki-domain` | 82 | JPA entities, repository queries |
+| `llm-wiki-service` | 172 | Pipeline, sync, search, graph, approval, maintenance |
+| `llm-wiki-web` | 115 | REST controllers, request/response handling |
+
+**Test conventions:**
+- `@ExtendWith(MockitoExtension.class)` for unit tests
+- `@Mock` / `@InjectMocks` for dependency injection
+- H2 in-memory DB for repository tests
+- `PageControllerTest` covers all 6 endpoints (list, getById, links, history, delete, 404)
+- `KnowledgeGraphServiceTest` covers BFS shortest path, graph stats, orphan counting
+- `ApprovalControllerTest` covers batch approve/reject, partial failures, history
+- `MaintenanceServiceTest` covers stale pages, contested pages, index consistency
+- `SearchServiceTest` covers offset pagination, dedup
 
 ## Notes
 

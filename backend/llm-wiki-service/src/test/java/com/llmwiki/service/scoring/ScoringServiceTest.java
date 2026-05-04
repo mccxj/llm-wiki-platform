@@ -236,4 +236,96 @@ class ScoringServiceTest {
         assertEquals(new BigDecimal("0.5"), weights.get("information_density"));
         assertEquals(new BigDecimal("0.3"), weights.get("entity_richness"));
     }
+
+    @Test
+    void getScoreWeights_shouldFallbackToDefaultsOnParseError() {
+        SystemConfig config = new SystemConfig();
+        config.setKey("scoring.weights");
+        config.setValue("invalid-format-no-colon");
+        when(configRepo.findByKey("scoring.weights")).thenReturn(Optional.of(config));
+
+        Map<String, BigDecimal> weights = scoringService.getScoreWeights();
+        assertEquals(new BigDecimal("0.30"), weights.get("information_density"));
+    }
+
+    @Test
+    void getScoreWeights_shouldReturnDefaultsWhenEmptyPairs() {
+        SystemConfig config = new SystemConfig();
+        config.setKey("scoring.weights");
+        config.setValue("");
+        when(configRepo.findByKey("scoring.weights")).thenReturn(Optional.of(config));
+
+        Map<String, BigDecimal> weights = scoringService.getScoreWeights();
+        assertEquals(new BigDecimal("0.30"), weights.get("information_density"));
+    }
+
+    @Test
+    void getDimensionThreshold_shouldReturnConfiguredValue() {
+        SystemConfig config = new SystemConfig();
+        config.setKey("scoring.threshold.relevance");
+        config.setValue("6.0");
+        when(configRepo.findByKey("scoring.threshold.relevance")).thenReturn(Optional.of(config));
+
+        BigDecimal threshold = scoringService.getDimensionThreshold("relevance");
+        assertEquals(new BigDecimal("6.0"), threshold);
+    }
+
+    @Test
+    void getDimensionThreshold_shouldReturnDefaultWhenNotConfigured() {
+        when(configRepo.findByKey("scoring.threshold.custom_dim")).thenReturn(Optional.empty());
+
+        BigDecimal threshold = scoringService.getDimensionThreshold("custom_dim");
+        assertEquals(new BigDecimal("5.0"), threshold);
+    }
+
+    @Test
+    void getDimensionThreshold_shouldFallbackToDefaultOnInvalidValue() {
+        SystemConfig config = new SystemConfig();
+        config.setKey("scoring.threshold.relevance");
+        config.setValue("not-a-number");
+        when(configRepo.findByKey("scoring.threshold.relevance")).thenReturn(Optional.of(config));
+
+        BigDecimal threshold = scoringService.getDimensionThreshold("relevance");
+        assertEquals(new BigDecimal("5.0"), threshold);
+    }
+
+    @Test
+    void passesThreshold_shouldReturnTrueWhenEqualToThreshold() {
+        when(configRepo.findByKey("scoring.threshold")).thenReturn(Optional.empty());
+
+        ScoreResult result = ScoreResult.builder()
+                .overallScore(new BigDecimal("5.0"))
+                .build();
+        assertTrue(scoringService.passesThreshold(result));
+    }
+
+    @Test
+    void passesDimensionThresholds_shouldWorkWithConfiguredDimensionThresholds() {
+        SystemConfig relevanceConfig = new SystemConfig();
+        relevanceConfig.setKey("scoring.threshold.relevance");
+        relevanceConfig.setValue("7.0");
+        when(configRepo.findByKey("scoring.threshold.relevance")).thenReturn(Optional.of(relevanceConfig));
+
+        SystemConfig accuracyConfig = new SystemConfig();
+        accuracyConfig.setKey("scoring.threshold.accuracy");
+        accuracyConfig.setValue("6.0");
+        when(configRepo.findByKey("scoring.threshold.accuracy")).thenReturn(Optional.of(accuracyConfig));
+
+        Map<String, Integer> scores = new HashMap<>();
+        scores.put("relevance", 7);
+        scores.put("accuracy", 6);
+        assertTrue(scoringService.passesDimensionThresholds(scores));
+    }
+
+    @Test
+    void passesDimensionThresholds_shouldFailWhenBelowConfiguredThreshold() {
+        SystemConfig relevanceConfig = new SystemConfig();
+        relevanceConfig.setKey("scoring.threshold.relevance");
+        relevanceConfig.setValue("8.0");
+        when(configRepo.findByKey("scoring.threshold.relevance")).thenReturn(Optional.of(relevanceConfig));
+
+        Map<String, Integer> scores = new HashMap<>();
+        scores.put("relevance", 7);
+        assertFalse(scoringService.passesDimensionThresholds(scores));
+    }
 }

@@ -47,7 +47,7 @@ class SyncServiceTest {
             .adapterClass("com.example.TestAdapter")
             .enabled(true)
             .build();
-        when(adapterFactory.getAdapter(anyString())).thenReturn(wikiSourceAdapter);
+        lenient().when(adapterFactory.getAdapter(anyString())).thenReturn(wikiSourceAdapter);
     }
 
     @Test
@@ -129,5 +129,82 @@ class SyncServiceTest {
 
         // Then
         assertNotNull(result.getErrorMessage());
+    }
+
+    @Test
+    void shouldProcessWhenContentHashDiffers() {
+        String content = "# Same Content";
+        RawDocumentDTO doc = new RawDocumentDTO("page-1", "Test", content, null, Instant.now());
+
+        RawDocument existing = RawDocument.builder()
+                .id(UUID.randomUUID()).sourceId("page-1")
+                .contentHash("different-hash").build();
+
+        when(sourceRepo.findById(source.getId())).thenReturn(Optional.of(source));
+        when(wikiSourceAdapter.fetchChanges(any())).thenReturn(List.of(doc));
+        when(rawDocRepo.findBySourceId("page-1")).thenReturn(Optional.of(existing));
+        when(rawDocRepo.save(any(RawDocument.class))).thenAnswer(i -> i.getArgument(0));
+        when(syncLogRepo.save(any(SyncLog.class))).thenAnswer(i -> i.getArgument(0));
+
+        SyncLog result = syncService.syncSource(source.getId());
+
+        assertEquals(1, result.getFetchedCount());
+        assertEquals(0, result.getSkippedCount());
+        assertEquals(1, result.getProcessedCount());
+    }
+
+    @Test
+    void shouldHandleEmptyDocumentList() {
+        when(sourceRepo.findById(source.getId())).thenReturn(Optional.of(source));
+        when(wikiSourceAdapter.fetchChanges(any())).thenReturn(List.of());
+        when(syncLogRepo.save(any(SyncLog.class))).thenAnswer(i -> i.getArgument(0));
+
+        SyncLog result = syncService.syncSource(source.getId());
+
+        assertEquals(0, result.getFetchedCount());
+        assertEquals(0, result.getProcessedCount());
+        assertEquals(com.llmwiki.common.enums.SyncStatus.SUCCESS, result.getStatus());
+    }
+
+    @Test
+    void shouldHandleIndividualDocumentFailure() {
+        RawDocumentDTO doc1 = new RawDocumentDTO("page-1", "Test1", "# Content1", null, Instant.now());
+        RawDocumentDTO doc2 = new RawDocumentDTO("page-2", "Test2", "# Content2", null, Instant.now());
+
+        when(sourceRepo.findById(source.getId())).thenReturn(Optional.of(source));
+        when(wikiSourceAdapter.fetchChanges(any())).thenReturn(List.of(doc1, doc2));
+        when(rawDocRepo.findBySourceId("page-1")).thenReturn(Optional.of(
+                RawDocument.builder().sourceId("page-1").contentHash("different-hash").build()));
+        when(rawDocRepo.findBySourceId("page-2")).thenThrow(new RuntimeException("DB error"));
+        when(rawDocRepo.save(any(RawDocument.class))).thenAnswer(i -> i.getArgument(0));
+        when(syncLogRepo.save(any(SyncLog.class))).thenAnswer(i -> i.getArgument(0));
+
+        SyncLog result = syncService.syncSource(source.getId());
+
+        assertEquals(2, result.getFetchedCount());
+        assertEquals(1, result.getProcessedCount());
+        assertEquals(1, result.getFailedCount());
+        assertEquals(com.llmwiki.common.enums.SyncStatus.PARTIAL, result.getStatus());
+    }
+
+    @Test
+    void shouldUpdateSourceLastSyncAt() {
+        when(sourceRepo.findById(source.getId())).thenReturn(Optional.of(source));
+        when(wikiSourceAdapter.fetchChanges(any())).thenReturn(List.of());
+        when(syncLogRepo.save(any(SyncLog.class))).thenAnswer(i -> i.getArgument(0));
+        when(sourceRepo.save(any(WikiSource.class))).thenAnswer(i -> i.getArgument(0));
+
+        syncService.syncSource(source.getId());
+
+        verify(sourceRepo).save(source);
+        assertNotNull(source.getLastSyncAt());
+    }
+
+    @Test
+    void shouldThrowWhenSourceNotFound() {
+        UUID sourceId = UUID.randomUUID();
+        when(sourceRepo.findById(sourceId)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalArgumentException.class, () -> syncService.syncSource(sourceId));
     }
 }

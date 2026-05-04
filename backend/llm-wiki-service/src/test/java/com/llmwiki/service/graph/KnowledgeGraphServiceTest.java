@@ -15,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -213,5 +214,153 @@ class KnowledgeGraphServiceTest {
         verify(edgeRepo).delete(edge1);
         verify(edgeRepo).delete(edge2);
         verify(nodeRepo).deleteById(nodeId);
+    }
+
+    @Test
+    void findShortestPath_shouldReturnDirectPath() {
+        UUID fromId = UUID.randomUUID();
+        UUID toId = UUID.randomUUID();
+        KgEdge edge = KgEdge.builder().id(UUID.randomUUID())
+                .sourceNodeId(fromId).targetNodeId(toId)
+                .edgeType(EdgeType.RELATED_TO).build();
+
+        when(edgeRepo.findBySourceNodeId(fromId)).thenReturn(List.of(edge));
+        when(edgeRepo.findByTargetNodeId(fromId)).thenReturn(List.of());
+
+        List<UUID> path = graphService.findShortestPath(fromId, toId);
+
+        assertEquals(2, path.size());
+        assertEquals(fromId, path.get(0));
+        assertEquals(toId, path.get(1));
+    }
+
+    @Test
+    void findShortestPath_shouldReturnSameNodeWhenFromEqualsTo() {
+        UUID nodeId = UUID.randomUUID();
+
+        List<UUID> path = graphService.findShortestPath(nodeId, nodeId);
+
+        assertEquals(1, path.size());
+        assertEquals(nodeId, path.get(0));
+        verifyNoInteractions(edgeRepo);
+    }
+
+    @Test
+    void findShortestPath_shouldReturnEmptyWhenNoPath() {
+        UUID fromId = UUID.randomUUID();
+        UUID toId = UUID.randomUUID();
+
+        when(edgeRepo.findBySourceNodeId(fromId)).thenReturn(List.of());
+        when(edgeRepo.findByTargetNodeId(fromId)).thenReturn(List.of());
+
+        List<UUID> path = graphService.findShortestPath(fromId, toId);
+
+        assertTrue(path.isEmpty());
+    }
+
+    @Test
+    void findShortestPath_shouldFindMultiHopPath() {
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+
+        KgEdge edgeAB = KgEdge.builder().id(UUID.randomUUID())
+                .sourceNodeId(a).targetNodeId(b).edgeType(EdgeType.RELATED_TO).build();
+        KgEdge edgeBC = KgEdge.builder().id(UUID.randomUUID())
+                .sourceNodeId(b).targetNodeId(c).edgeType(EdgeType.RELATED_TO).build();
+
+        when(edgeRepo.findBySourceNodeId(a)).thenReturn(List.of(edgeAB));
+        when(edgeRepo.findByTargetNodeId(a)).thenReturn(List.of());
+        when(edgeRepo.findBySourceNodeId(b)).thenReturn(List.of(edgeBC));
+        when(edgeRepo.findByTargetNodeId(b)).thenReturn(List.of());
+
+        List<UUID> path = graphService.findShortestPath(a, c);
+
+        assertEquals(3, path.size());
+        assertEquals(a, path.get(0));
+        assertEquals(b, path.get(1));
+        assertEquals(c, path.get(2));
+    }
+
+    @Test
+    void findShortestPath_shouldTraverseIncomingEdges() {
+        UUID fromId = UUID.randomUUID();
+        UUID midId = UUID.randomUUID();
+        UUID toId = UUID.randomUUID();
+
+        KgEdge edgeToMid = KgEdge.builder().id(UUID.randomUUID())
+                .sourceNodeId(midId).targetNodeId(fromId).edgeType(EdgeType.RELATED_TO).build();
+        KgEdge edgeMidTo = KgEdge.builder().id(UUID.randomUUID())
+                .sourceNodeId(midId).targetNodeId(toId).edgeType(EdgeType.RELATED_TO).build();
+
+        when(edgeRepo.findBySourceNodeId(fromId)).thenReturn(List.of());
+        when(edgeRepo.findByTargetNodeId(fromId)).thenReturn(List.of(edgeToMid));
+        when(edgeRepo.findBySourceNodeId(midId)).thenReturn(List.of(edgeMidTo));
+        when(edgeRepo.findByTargetNodeId(midId)).thenReturn(List.of());
+
+        List<UUID> path = graphService.findShortestPath(fromId, toId);
+
+        assertEquals(3, path.size());
+        assertEquals(fromId, path.get(0));
+        assertEquals(midId, path.get(1));
+        assertEquals(toId, path.get(2));
+    }
+
+    @Test
+    void getGraphStats_shouldReturnCounts() {
+        when(nodeRepo.count()).thenReturn(10L);
+        when(edgeRepo.count()).thenReturn(20L);
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of());
+        for (NodeType type : NodeType.values()) {
+            when(nodeRepo.countByNodeType(type)).thenReturn(3L);
+        }
+        for (EdgeType type : EdgeType.values()) {
+            when(edgeRepo.countByEdgeType(type)).thenReturn(2L);
+        }
+
+        Map<String, Object> stats = graphService.getGraphStats();
+
+        assertEquals(10L, stats.get("totalNodes"));
+        assertEquals(20L, stats.get("totalEdges"));
+        assertEquals(0, stats.get("orphanCount"));
+        assertNotNull(stats.get("nodeTypeCounts"));
+        assertNotNull(stats.get("edgeTypeCounts"));
+    }
+
+    @Test
+    void getGraphStats_shouldIncludeOrphanCount() {
+        KgNode orphan = KgNode.builder()
+                .id(UUID.randomUUID()).name("Orphan").nodeType(NodeType.ENTITY).build();
+        when(nodeRepo.count()).thenReturn(5L);
+        when(edgeRepo.count()).thenReturn(2L);
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of(orphan));
+        for (NodeType type : NodeType.values()) {
+            when(nodeRepo.countByNodeType(type)).thenReturn(1L);
+        }
+        for (EdgeType type : EdgeType.values()) {
+            when(edgeRepo.countByEdgeType(type)).thenReturn(1L);
+        }
+
+        Map<String, Object> stats = graphService.getGraphStats();
+
+        assertEquals(1, stats.get("orphanCount"));
+    }
+
+    @Test
+    void getGraphStats_shouldWorkWithEmptyGraph() {
+        when(nodeRepo.count()).thenReturn(0L);
+        when(edgeRepo.count()).thenReturn(0L);
+        when(nodeRepo.findOrphanNodes()).thenReturn(List.of());
+        for (NodeType type : NodeType.values()) {
+            when(nodeRepo.countByNodeType(type)).thenReturn(0L);
+        }
+        for (EdgeType type : EdgeType.values()) {
+            when(edgeRepo.countByEdgeType(type)).thenReturn(0L);
+        }
+
+        Map<String, Object> stats = graphService.getGraphStats();
+
+        assertEquals(0L, stats.get("totalNodes"));
+        assertEquals(0L, stats.get("totalEdges"));
     }
 }

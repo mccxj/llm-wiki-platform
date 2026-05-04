@@ -90,4 +90,71 @@ class AuthControllerTest {
         assertEquals(200, response.getStatusCodeValue());
         verify(passwordEncoder).encode("newpassword");
     }
+
+    @Test
+    void registerShouldReturn400WhenUsernameExists() {
+        AuthController.LoginRequest request = new AuthController.LoginRequest();
+        request.setUsername("admin");
+        request.setPassword("anypassword");
+
+        var response = controller.register(request);
+
+        assertEquals(400, response.getStatusCodeValue());
+    }
+
+    @Test
+    void verifyShouldReturnValidForGoodToken() {
+        when(tokenProvider.validateToken("valid-token")).thenReturn(true);
+        when(tokenProvider.getUserId("valid-token")).thenReturn("admin");
+        when(tokenProvider.getRole("valid-token")).thenReturn("ADMIN");
+
+        var response = controller.verify("Bearer valid-token");
+
+        assertEquals(200, response.getStatusCodeValue());
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertEquals(true, body.get("valid"));
+        assertEquals("admin", body.get("userId"));
+        assertEquals("ADMIN", body.get("role"));
+    }
+
+    @Test
+    void verifyShouldReturnInvalidForBadToken() {
+        when(tokenProvider.validateToken("invalid-token")).thenReturn(false);
+
+        var response = controller.verify("Bearer invalid-token");
+
+        assertEquals(200, response.getStatusCodeValue());
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertEquals(false, body.get("valid"));
+    }
+
+    @Test
+    void verifyShouldReturn400WhenNoBearerToken() {
+        var response = controller.verify(null);
+
+        assertEquals(400, response.getStatusCodeValue());
+    }
+
+    @Test
+    void verifyShouldReturn400WhenNoAuthHeader() {
+        var response = controller.verify("");
+
+        assertEquals(400, response.getStatusCodeValue());
+    }
+
+    @Test
+    void loginShouldReturnUserRoleForNonAdmin() {
+        when(passwordEncoder.matches("user_password", "encoded_user")).thenReturn(true);
+        when(tokenProvider.createToken("user", "USER")).thenReturn("user-token");
+
+        AuthController.LoginRequest request = new AuthController.LoginRequest();
+        request.setUsername("user");
+        request.setPassword("user_password");
+
+        var response = controller.login(request);
+
+        assertEquals(200, response.getStatusCodeValue());
+        Map<String, String> body = (Map<String, String>) response.getBody();
+        assertEquals("USER", body.get("role"));
+    }
 }
