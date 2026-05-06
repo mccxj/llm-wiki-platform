@@ -7,7 +7,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "sync_log")
+@Table(name = "sync_logs")
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class SyncLog {
     @Id

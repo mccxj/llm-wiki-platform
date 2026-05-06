@@ -11,7 +11,10 @@ import java.time.Instant;
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class SystemConfig {
     @Id
-    @Column(name = "config_key")
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(name = "config_key", nullable = false, unique = true)
     private String key;
 
     @Column(nullable = false, columnDefinition = "TEXT")

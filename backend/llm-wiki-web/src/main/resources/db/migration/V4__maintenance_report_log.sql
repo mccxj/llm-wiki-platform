@@ -1,7 +1,7 @@
 CREATE TABLE maintenance_report_log (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     task_type VARCHAR(100) NOT NULL,
-    result JSONB,
+    result TEXT,
     status VARCHAR(50) DEFAULT 'COMPLETED',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

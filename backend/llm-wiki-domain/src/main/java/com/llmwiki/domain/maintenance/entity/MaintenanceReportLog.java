@@ -18,7 +18,7 @@ public class MaintenanceReportLog {
     @Column(name = "task_type", nullable = false)
     private String taskType;
 
-    @Column(name = "result", columnDefinition = "jsonb")
+    @Column(name = "result", columnDefinition = "text")
     private String result;
 
     @Column(name = "status")
