@@ -42,10 +42,10 @@ public class SearchService {
             String vectorStr = embeddingToJson(queryEmbedding);
             int limit = request.getLimit() > 0 ? request.getLimit() : 10;
 
-            // Use native query for vector similarity search via pgvector
+            // Use native query for vector similarity search via MariaDB VECTOR_DISTANCE
             Query nativeQuery = entityManager.createNativeQuery(
-                "SELECT v.node_id as nodeId, (v.vector <-> CAST(:queryVector AS vector)) as distance " +
-                "FROM kg_vectors v ORDER BY v.vector <-> CAST(:queryVector AS vector) LIMIT :limit");
+                "SELECT v.node_id as nodeId, VEC_DISTANCE(v.vector, VEC_FromText(:queryVector)) as distance " +
+                "FROM kg_vectors v ORDER BY distance ASC LIMIT :limit");
             nativeQuery.setParameter("queryVector", vectorStr);
             nativeQuery.setParameter("limit", limit * 3); // fetch extra for post-filtering
             @SuppressWarnings("unchecked")

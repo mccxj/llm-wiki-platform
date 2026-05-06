@@ -49,7 +49,7 @@ Each module has its own AGENTS.md:
 - **Enums:** All in `llm-wiki-common/enums/`. Use `@Enumerated(EnumType.STRING)` on entity fields.
 - **Adapter pattern:** AI clients implement interfaces in `adapter/api/`. Controller → Service → Adapter — never call adapters from controllers directly.
 - **Flyway:** `V{version}__description.sql` in `db/migration/`. No `ddl-auto` changes.
-- **Tests:** H2 in-memory DB. Main profile uses PostgreSQL + pgvector.
+- **Tests:** H2 in-memory DB. Main profile uses MariaDB 11.8+ with native VECTOR.
 
 ## ANTI-PATTERNS
 
@@ -57,5 +57,5 @@ Each module has its own AGENTS.md:
 - **Don't bypass adapter interfaces.** Always use `AiApiClient`/`EmbeddingClient` for AI calls. Direct HTTP calls to AI APIs get rejected in review.
 - **No deps on llm-wiki-common.** It's the foundation — adding dependencies would create circular chains.
 - **`ddl-auto: update` is forbidden.** Schema is Flyway-managed (`validate` only). Changes go in migration SQL files.
-- **Vectors only in `kg_vectors` table.** Use pgvector `vector(1536)` type. No inline vector columns.
+- **Vectors only in `kg_vectors` table.** Use MariaDB `VECTOR(1536)` type. No inline vector columns.
 - **No cross-module package scanning.** Spring Boot scans `com.llmwiki`. Each module's beans are picked up automatically.

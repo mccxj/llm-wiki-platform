@@ -35,3 +35,4 @@ ALTER TABLE approval_queue ADD COLUMN IF NOT EXISTS summary TEXT;
 -- Add base_url to wiki_sources if missing
 -- =============================================
 ALTER TABLE wiki_sources ADD COLUMN IF NOT EXISTS base_url VARCHAR(512);
+

@@ -2,19 +2,20 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: ankane/pgvector:latest
-    container_name: llmwiki-postgres
+  mariadb:
+    image: mariadb:11.8
+    container_name: llmwiki-mariadb
     environment:
-      POSTGRES_DB: llmwiki
-      POSTGRES_USER: llmwiki
-      POSTGRES_PASSWORD: llmwiki
+      MARIADB_DATABASE: llmwiki
+      MARIADB_USER: llmwiki
+      MARIADB_PASSWORD: llmwiki
+      MARIADB_ROOT_PASSWORD: llmwiki
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mariadb_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U llmwiki"]
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,10 +26,10 @@ services:
       dockerfile: Dockerfile
     container_name: llmwiki-app
     depends_on:
-      postgres:
+      mariadb:
         condition: service_healthy
     environment:
-      DB_HOST: postgres
+      DB_HOST: mariadb
       DB_USERNAME: llmwiki
       DB_PASSWORD: llmwiki
       AI_API_BASE_URL: ${AI_API_BASE_URL:-http://host.docker.internal:8000/v1}
@@ -50,4 +51,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  pgdata:
+  mariadb_data:

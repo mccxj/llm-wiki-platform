@@ -10,7 +10,7 @@
 |---|---|---|
 | 后端框架 | Spring Boot 3.x (Java 17+) | 主流 Java 生态 |
 | ORM | MyBatis-Plus | 灵活 SQL 控制，适合复杂查询 |
-| 数据库 | PostgreSQL 16 + pgvector | 关系数据 + 向量检索 |
+| 数据库 | MariaDB 11.8+ (原生 VECTOR) | 关系数据 + 向量检索 |
 | 缓存 | Caffeine (本地) | 配置缓存、评分缓存 |
 | 调度 | Spring Scheduler + db-scheduler | 定时同步任务 |
 | 前端 | React 18 + Ant Design 5.x | PRD 确认 |
@@ -169,8 +169,7 @@ frontend/
 ### 3.1 建表脚本
 
 ```sql
--- 启用 pgvector 扩展
-CREATE EXTENSION IF NOT EXISTS vector;
+-- MariaDB 11.8+ 原生 VECTOR 类型无需扩展
 
 -- ========== 系统配置 ==========
 CREATE TABLE system_config (
@@ -1147,7 +1146,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 ```yaml
 spring:
   datasource:
-    url: jdbc:postgresql://db:5432/llmwiki
+     url: jdbc:mariadb://db:3306/llmwiki
     username: llmwiki
     password: ${DB_PASSWORD}
   jackson:
@@ -1185,18 +1184,19 @@ mybatis-plus:
 version: '3.8'
 
 services:
-  db:
-    image: ankane/pgvector:latest
-    environment:
-      POSTGRES_DB: llmwiki
-      POSTGRES_USER: llmwiki
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
-    healthcheck:
+   db:
+     image: mariadb:11.8
+     environment:
+       MARIADB_DATABASE: llmwiki
+       MARIADB_USER: llmwiki
+       MARIADB_PASSWORD: ${DB_PASSWORD}
+       MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+     volumes:
+       - mariadb_data:/var/lib/mysql
+       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+     ports:
+       - "3306:3306"
+     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U llmwiki"]
       interval: 10s
       timeout: 5s
@@ -1227,19 +1227,19 @@ services:
       - app
 
 volumes:
-  pgdata:
+   mariadb_data:
 ```
 
 ---
 
 ## 13. 关键实现注意事项
 
-### 13.1 pgvector 使用要点
+### 13.1 MariaDB VECTOR 使用要点
 
 1. **向量维度**必须与 embedding 模型匹配（ada-002 = 1536）
-2. **IVFFlat 索引**的 `lists` 参数：建议设为 `sqrt(行数)`，数据量 < 1000 时可不建索引
-3. **距离运算符**：`<=>` 余弦距离，`<->` 欧氏距离，`<#>` 内积（取负）
-4. **Spring Data JPA** 不支持 vector 类型，需要用 `@Query(nativeQuery=true)` 或 MyBatis
+2. **VECTOR 类型**：使用 `VECTOR(n)` 定义列，`VEC_FromText()` 插入，`VEC_DISTANCE()` 计算距离
+3. **距离函数**：`VEC_DISTANCE(vec1, vec2)` 计算欧氏距离，结果越小越相似
+4. **Spring Data JPA** 不支持 VECTOR 类型，需要用 `@Query(nativeQuery=true)` 或 EntityManager 原生查询
 
 ### 13.2 流水线可靠性
 
@@ -1252,7 +1252,7 @@ volumes:
 
 1. **AI 调用批处理**：实体提取和概念提取合并为一次 API 调用
 2. **配置缓存**：`system_config` 使用 Caffeine 本地缓存，5 分钟过期
-3. **向量检索**：pgvector IVFFlat 索引 + 合理的 `lists` 参数
+3. **向量检索**：MariaDB `VEC_DISTANCE()` 函数 + 原生 SQL 查询
 4. **前端**：Ant Design 组件懒加载，Cytoscape 虚拟化渲染
 
 ---

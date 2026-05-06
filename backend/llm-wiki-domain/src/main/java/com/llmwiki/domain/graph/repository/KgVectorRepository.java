@@ -15,7 +15,7 @@ public interface KgVectorRepository extends JpaRepository<KgVector, UUID> {
     /**
      * E-7: Find all vectors excluding a specific node.
      * Similarity filtering happens in the service layer (SemanticDedupService)
-     * to avoid pgvector-specific operators that break H2 compatibility.
+     * to avoid database-specific vector operators that break H2 compatibility.
      */
     List<KgVector> findByNodeIdNot(UUID excludeId);
 }

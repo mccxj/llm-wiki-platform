@@ -12,7 +12,7 @@ JPA entities and Spring Data repositories. Organized by domain area under `com.l
 | Area | Entities | Purpose |
 |------|----------|---------|
 | `sync` | `RawDocument`, `WikiSource`, `SyncLog` | Wiki source polling + raw document ingestion |
-| `graph` | `KgNode`, `KgEdge`, `KgVector` | Knowledge graph with pgvector embeddings |
+| `graph` | `KgNode`, `KgEdge`, `KgVector` | Knowledge graph with MariaDB VECTOR embeddings |
 | `page` | `Page`, `PageLink`, `PageTag`, `PageTagId` | Generated pages + cross-references + tags |
 | `processing` | `ProcessingLog` | Pipeline step tracking per document |
 | `approval` | `ApprovalQueue` | Approval workflow for generated pages |

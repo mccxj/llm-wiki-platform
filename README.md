@@ -20,7 +20,7 @@
 ## 技术栈
 
 - **后端**: Java 17 + Spring Boot 3.2 + Maven 多模块
-- **数据库**: PostgreSQL 14 + pgvector (向量扩展)
+- **数据库**: MariaDB 11.8+ (原生 VECTOR 支持)
 - **AI**: OpenAI 兼容 API (评分、实体提取、Embedding、对话)
 - **前端**: React 18 + TypeScript + Ant Design + D3.js
 - **部署**: Docker Compose

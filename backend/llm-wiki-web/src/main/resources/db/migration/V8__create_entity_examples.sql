@@ -1,14 +1,14 @@
 -- Create entity_examples table for few-shot prompting support
 CREATE TABLE IF NOT EXISTS entity_examples (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT UUID(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
     example_text TEXT NOT NULL,
     extraction_data TEXT,
     entity_type VARCHAR(50) NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE,
-    updated_at TIMESTAMP WITH TIME ZONE
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP
 );
 
 -- Index for querying by entity type

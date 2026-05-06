@@ -28,7 +28,7 @@
 
 ### 1.4 核心约束
 
-- **技术栈**：后端 Java，数据库 PostgreSQL（含 pgvector 扩展），Docker 部署
+- **技术栈**：后端 Java，数据库 MariaDB 11.8+（原生 VECTOR 支持），Docker 部署
 - **部署环境**：内网，Docker Compose
 - **AI 接口**：OpenAI 兼容 API（由接入方提供 base URL 和 API key）
 - **数据库统一**：所有数据（结构化数据 + 向量 + 关系）均存储在 PostgreSQL 中，不引入额外数据库组件
@@ -187,7 +187,7 @@
 |---|---|
 | `kg_nodes` | 知识图谱节点（实体、概念、页面） |
 | `kg_edges` | 节点间关系（边） |
-| `kg_vectors` | 节点向量（使用 pgvector） |
+| `kg_vectors` | 节点向量（使用 MariaDB VECTOR） |
 | `kg_node_tags` | 节点标签关联 |
 
 #### 2.5.2 节点类型
@@ -216,13 +216,13 @@
 - **文档级向量**：整篇文档的 embedding，用于文档搜索
 - **实体/概念级向量**：每个实体/概念的 embedding，用于实体匹配和语义问答
 - 向量维度由 embedding 模型决定（如 text-embedding-ada-002 为 1536 维）
-- 使用 pgvector 的 `vector` 类型和 IVFFlat 索引加速检索
+- 使用 MariaDB 11.8+ 原生 `VECTOR` 类型和 `VEC_DISTANCE()` 函数加速检索
 
 ### 2.6 搜索模块
 
 #### 2.6.1 语义搜索
 
-- 用户输入查询文本 → 生成查询向量 → pgvector 近似最近邻检索
+- 用户输入查询文本 → 生成查询向量 → MariaDB VEC_DISTANCE() 近似最近邻检索
 - 支持按节点类型过滤（只搜实体/只搜概念等）
 - 返回结果附带相关度分数和摘要片段
 
@@ -435,7 +435,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | node_id | UUID | 关联节点 |
-| vector | vector(N) | 向量值（pgvector） |
+| vector | VECTOR(N) | 向量值（MariaDB 原生 VECTOR） |
 | model | VARCHAR(100) | 使用的 embedding 模型 |
 | created_at | TIMESTAMPTZ | 创建时间 |
 
@@ -671,7 +671,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/llmwiki
+      - SPRING_DATASOURCE_URL=jdbc:mariadb://db:3306/llmwiki
       - AI_API_BASE_URL=${AI_API_BASE_URL}
       - AI_API_KEY=${AI_API_KEY}
     depends_on:
@@ -679,16 +679,17 @@ services:
         condition: service_healthy
 
   db:
-    image: ankane/pgvector:latest
+    image: mariadb:11.8
     environment:
-      - POSTGRES_DB=llmwiki
-      - POSTGRES_USER=llmwiki
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - MARIADB_DATABASE=llmwiki
+      - MARIADB_USER=llmwiki
+      - MARIADB_PASSWORD=${DB_PASSWORD}
+      - MARIADB_ROOT_PASSWORD=${DB_PASSWORD}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - mariadb_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U llmwiki"]
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -701,7 +702,7 @@ services:
       - app
 
 volumes:
-  pgdata:
+  mariadb_data:
 ```
 
 ### 7.2 环境变量

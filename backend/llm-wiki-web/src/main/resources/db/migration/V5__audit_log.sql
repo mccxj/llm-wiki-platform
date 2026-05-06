@@ -1,5 +1,5 @@
 CREATE TABLE audit_log (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT UUID(),
     action VARCHAR(100) NOT NULL,
     entity_type VARCHAR(100),
     entity_id UUID,
@@ -8,7 +8,7 @@ CREATE TABLE audit_log (
     before_value TEXT,
     after_value TEXT,
     ip_address VARCHAR(50),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX idx_audit_action ON audit_log(action);
 CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id);

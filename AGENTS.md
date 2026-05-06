@@ -1,7 +1,7 @@
 # LLM Wiki Platform — Knowledge Base
 
 **Generated:** 2026-05-04
-**Stack:** Java 17 + Spring Boot 3.2 + React 18 + TypeScript + PostgreSQL + pgvector
+**Stack:** Java 17 + Spring Boot 3.2 + React 18 + TypeScript + MariaDB 11.8+ (native VECTOR)
 
 ## Overview
 
@@ -21,7 +21,7 @@ llm-wiki-platform/
 │   ├── src/pages/           # Dashboard, Pages, Search, Approvals, Graph
 │   ├── src/components/      # Layout
 │   └── src/api.ts           # Axios API client
-├── docker-compose.yml        # postgres + backend + frontend
+├── docker-compose.yml        # mariadb + backend + frontend
 ├── Dockerfile               # Multi-stage: Maven build → JRE 17 runtime
 └── .github/workflows/       # OpenCode AI agent CI
 ```
@@ -76,7 +76,7 @@ llm-wiki-web → llm-wiki-service → llm-wiki-domain → llm-wiki-common
 - Don't bypass the adapter interface for AI calls — use `AiApiClient`/`EmbeddingClient` interfaces
 - Don't add dependencies to `llm-wiki-common` — it's the foundation module
 - Don't use `ddl-auto: update` — schema is Flyway-managed (`validate` only)
-- Don't store vectors outside `kg_vectors` table — use pgvector `vector(1536)` type
+- Don't store vectors outside `kg_vectors` table — use MariaDB `VECTOR(1536)` type
 
 ## Commands
 
@@ -100,7 +100,7 @@ docker-compose logs -f backend                 # tail backend logs
 ## Config
 
 All externalized via `application.yml` env vars:
-- `DB_HOST`, `DB_USERNAME`, `DB_PASSWORD` — PostgreSQL
+- `DB_HOST`, `DB_USERNAME`, `DB_PASSWORD` — MariaDB
 - `AI_API_BASE_URL`, `AI_API_KEY`, `AI_MODEL` — OpenAI-compatible API
 - `EMBEDDING_MODEL`, `EMBEDDING_DIMENSION` — vector config (default: ada-002, 1536)
 
@@ -131,7 +131,7 @@ All externalized via `application.yml` env vars:
 - Frontend locale is `zh_CN` (Chinese)
 - `code-review-graph` MCP is installed — use `detect_changes`, `query_graph`, `get_impact_radius` before manual grep for code review
 - Spring Boot scans `com.llmwiki` base package; JPA repositories and entities are in `com.llmwiki.domain`
-- Tests use H2 in-memory DB; main profile uses PostgreSQL + pgvector
+- Tests use H2 in-memory DB; main profile uses MariaDB 11.8+ with native VECTOR
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph
