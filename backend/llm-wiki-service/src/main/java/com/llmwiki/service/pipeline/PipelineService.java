@@ -548,27 +548,7 @@ public class PipelineService {
             pageTagRepo.save(PageTag.builder().pageId(page.getId()).tag(tag).build());
         }
 
-        // Generate document-level vector embedding
-        embedPageContent(page);
-
         return page;
-    }
-
-    private void embedPageContent(Page page) {
-        try {
-            float[] embedding = embeddingClient.embed(page.getContent());
-            // Store as JSON array string for H2 compatibility
-            StringBuilder sb = new StringBuilder("[");
-            for (int i = 0; i < embedding.length; i++) {
-                if (i > 0) sb.append(",");
-                sb.append(embedding[i]);
-            }
-            sb.append("]");
-            page.setContentVector(sb.toString());
-            pageRepo.save(page);
-        } catch (Exception e) {
-            log.warn("Failed to embed page content {}: {}", page.getId(), e.getMessage());
-        }
     }
 
     private String generateUniqueSlug(String title) {

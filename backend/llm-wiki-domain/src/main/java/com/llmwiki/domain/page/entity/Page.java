@@ -47,12 +47,6 @@ public class Page {
     @Column(columnDefinition = "TEXT")
     private String aiScoreDetail;
 
-    /**
-     * 文档级向量嵌入（JSON数组字符串存储，用于H2兼容；生产环境使用MariaDB VECTOR）
-     */
-    @Column(name = "content_vector", columnDefinition = "TEXT")
-    private String contentVector;
-
     private UUID sourceDocId;
 
     private String approvedBy;
