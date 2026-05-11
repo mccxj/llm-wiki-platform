@@ -35,6 +35,8 @@ jobs:
           cache: "npm"
       - name: Setup agent
         uses: tee-labs/agent-standby@latest
+        with:
+          lsp_java: true
       - name: Run opencode
         uses: anomalyco/opencode/github@latest
         env:
