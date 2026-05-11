@@ -6,6 +6,8 @@ import com.llmwiki.domain.graph.entity.KgNode;
 import com.llmwiki.domain.graph.entity.KgVector;
 import com.llmwiki.domain.graph.repository.KgNodeRepository;
 import com.llmwiki.domain.graph.repository.KgVectorRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.Query;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,15 +25,22 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class SemanticDedupServiceTest {
 
-    @Mock EmbeddingClient embeddingClient;
-    @Mock KgNodeRepository kgNodeRepo;
-    @Mock KgVectorRepository kgVectorRepo;
+    @Mock
+    EmbeddingClient embeddingClient;
+    @Mock
+    EntityManager entityManager;
+    @Mock
+    Query idQuery;
+    @Mock
+    KgNodeRepository kgNodeRepo;
+    @Mock
+    KgVectorRepository kgVectorRepo;
 
     SemanticDedupService service;
 
     @BeforeEach
     void setUp() {
-        service = new SemanticDedupService(embeddingClient, kgNodeRepo, kgVectorRepo, 0.85, 0.70);
+        service = new SemanticDedupService(embeddingClient, entityManager, kgNodeRepo, kgVectorRepo, 0.85, 0.70);
     }
 
     @Test
@@ -66,15 +75,22 @@ class SemanticDedupServiceTest {
         float[] emb = {1, 0, 0};
         when(embeddingClient.embed(anyString())).thenReturn(emb);
 
+        UUID nodeId = UUID.randomUUID();
         KgNode existingNode = KgNode.builder()
-                .id(UUID.randomUUID()).name("Java").nodeType(NodeType.ENTITY).build();
-        KgVector existingVector = KgVector.builder()
-                .nodeId(existingNode.getId()).vector(emb).build();
+                .id(nodeId).name("Java").nodeType(NodeType.ENTITY).build();
+        float[] existingVector = {1, 0, 0};
 
-        when(kgVectorRepo.findByNodeIdNot(any(UUID.class)))
-                .thenReturn(List.of(existingVector));
-        when(kgNodeRepo.findById(existingNode.getId()))
-                .thenReturn(Optional.of(existingNode));
+        // Mock: DB returns candidate IDs (single-column query)
+        when(entityManager.createNativeQuery(anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("queryVector"), anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("excludeId"), any(UUID.class))).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("maxDistance"), any(Double.class))).thenReturn(idQuery);
+        when(idQuery.getResultList()).thenReturn(List.of(nodeId));
+
+        // Mock: fetch node and vector for similarity computation
+        when(kgNodeRepo.findById(nodeId)).thenReturn(Optional.of(existingNode));
+        when(kgVectorRepo.findByNodeId(nodeId)).thenReturn(Optional.of(
+                KgVector.builder().nodeId(nodeId).vector(existingVector).build()));
 
         var result = service.checkDuplicate("Java", "TECH", "Programming language");
 
@@ -86,19 +102,24 @@ class SemanticDedupServiceTest {
 
     @Test
     void checkDuplicate_mediumSimilarity_returnsCandidate() {
+        // Similar but not identical vector → cosine ≈ 0.71 (between 0.70 and 0.85)
         float[] emb1 = {1, 0, 0};
-        float[] emb2 = {0.8f, 0.6f, 0}; // cosine similarity = 0.8
+        float[] emb2 = {0.7f, 0.714f, 0};
         when(embeddingClient.embed(anyString())).thenReturn(emb1);
 
+        UUID nodeId = UUID.randomUUID();
         KgNode existingNode = KgNode.builder()
-                .id(UUID.randomUUID()).name("Java Platform").nodeType(NodeType.ENTITY).build();
-        KgVector existingVector = KgVector.builder()
-                .nodeId(existingNode.getId()).vector(emb2).build();
+                .id(nodeId).name("Java Platform").nodeType(NodeType.ENTITY).build();
 
-        when(kgVectorRepo.findByNodeIdNot(any(UUID.class)))
-                .thenReturn(List.of(existingVector));
-        when(kgNodeRepo.findById(existingNode.getId()))
-                .thenReturn(Optional.of(existingNode));
+        when(entityManager.createNativeQuery(anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("queryVector"), anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("excludeId"), any(UUID.class))).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("maxDistance"), any(Double.class))).thenReturn(idQuery);
+        when(idQuery.getResultList()).thenReturn(List.of(nodeId));
+
+        when(kgNodeRepo.findById(nodeId)).thenReturn(Optional.of(existingNode));
+        when(kgVectorRepo.findByNodeId(nodeId)).thenReturn(Optional.of(
+                KgVector.builder().nodeId(nodeId).vector(emb2).build()));
 
         var result = service.checkDuplicate("Java", "TECH", "Programming language");
 
@@ -109,19 +130,20 @@ class SemanticDedupServiceTest {
 
     @Test
     void checkDuplicate_lowSimilarity_returnsNew() {
+        // Orthogonal vectors → cosine similarity = 0 (far below warnThreshold 0.70)
         float[] emb1 = {1, 0, 0};
-        float[] emb2 = {0, 1, 0}; // orthogonal, similarity = 0
+        float[] emb2 = {0, 1, 0};
         when(embeddingClient.embed(anyString())).thenReturn(emb1);
 
-        KgNode existingNode = KgNode.builder()
-                .id(UUID.randomUUID()).name("Python").nodeType(NodeType.ENTITY).build();
-        KgVector existingVector = KgVector.builder()
-                .nodeId(existingNode.getId()).vector(emb2).build();
+        UUID nodeId = UUID.randomUUID();
 
-        when(kgVectorRepo.findByNodeIdNot(any(UUID.class)))
-                .thenReturn(List.of(existingVector));
-        when(kgNodeRepo.findById(existingNode.getId()))
-                .thenReturn(Optional.of(existingNode));
+        when(entityManager.createNativeQuery(anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("queryVector"), anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("excludeId"), any(UUID.class))).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("maxDistance"), any(Double.class))).thenReturn(idQuery);
+        when(idQuery.getResultList()).thenReturn(List.of(nodeId));
+
+        when(kgNodeRepo.findById(nodeId)).thenReturn(Optional.empty()); // node deleted
 
         var result = service.checkDuplicate("Java", "TECH", "Programming language");
 
@@ -141,8 +163,11 @@ class SemanticDedupServiceTest {
     @Test
     void checkDuplicate_noCandidates_returnsNew() {
         when(embeddingClient.embed(anyString())).thenReturn(new float[]{1, 0, 0});
-        when(kgVectorRepo.findByNodeIdNot(any(UUID.class)))
-                .thenReturn(List.of());
+        when(entityManager.createNativeQuery(anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("queryVector"), anyString())).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("excludeId"), any(UUID.class))).thenReturn(idQuery);
+        when(idQuery.setParameter(eq("maxDistance"), any(Double.class))).thenReturn(idQuery);
+        when(idQuery.getResultList()).thenReturn(List.of());
 
         var result = service.checkDuplicate("Java", "TECH", "Programming language");
 
