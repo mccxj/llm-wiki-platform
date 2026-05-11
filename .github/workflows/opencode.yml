@@ -44,4 +44,4 @@ jobs:
           CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
         with:
           use_github_token: true
-          model: ${{ secrets.DEFAULT_MODEL || 'x-openai/ark-code-latest' }}
+          model: ${{ secrets.DEFAULT_MODEL }}
