@@ -15,6 +15,8 @@ public class KgVector {
     private UUID nodeId;
 
     @Convert(converter = FloatArrayToJsonConverter.class)
+    @Version
+    private Integer version;
     @Column(nullable = false, columnDefinition = "VECTOR(1536)")
     private float[] vector;
 
