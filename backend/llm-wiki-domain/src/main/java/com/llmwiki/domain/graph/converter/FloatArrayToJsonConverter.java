@@ -9,9 +9,22 @@ import java.util.List;
 
 /**
  * JPA AttributeConverter for converting float[] to/from JSON string.
- * MariaDB VECTOR type stores vectors as JSON arrays, so this converter
- * handles the serialization/deserialization of float arrays for JPA entities.
+ * <p>
+ * <strong>Deprecated:</strong> This converter serialises vectors as JSON strings,
+ * which cannot be written to a MariaDB VECTOR column through standard JDBC
+ * {@code setString()} — MariaDB requires {@code VEC_FromText()} SQL syntax.
+ * <p>
+ * Use {@link com.llmwiki.domain.graph.converter.MariaDBVectorType} instead,
+ * which leverages MariaDB Connector/J 3.5+'s native VECTOR support via
+ * {@code PreparedStatement.setObject(index, float[])}.
+ * <p>
+ * This converter is retained for standalone utility use (e.g. converting
+ * vectors outside JPA) but is no longer wired into any entity mapping.
+ *
+ * @deprecated Replaced by {@link MariaDBVectorType} Hibernate UserType.
+ * Will be removed in a future release.
  */
+@Deprecated
 @Converter
 public class FloatArrayToJsonConverter implements AttributeConverter<float[], String> {
 

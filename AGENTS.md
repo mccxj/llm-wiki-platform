@@ -78,6 +78,13 @@ llm-wiki-web → llm-wiki-service → llm-wiki-domain → llm-wiki-common
 - Don't use `ddl-auto: update` — schema is Flyway-managed (`validate` only)
 - Don't store vectors outside `kg_vectors` table — use MariaDB `VECTOR(1536)` type
 
+## MariaDB VECTOR Conventions
+
+- **All VECTOR columns** must use `@Type(MariaDBVectorType.class)` with `@Column(columnDefinition = "VECTOR(1536)")`
+- **Do NOT use `@Convert` with a JSON serializer** for VECTOR columns — the JDBC driver requires `setObject(float[])`, not `setString()`, to write to MariaDB VECTOR columns
+- **Native SQL vector queries** use `VEC_DISTANCE()` and `VEC_FromText()` MariaDB functions (see `SearchService`, `SemanticDedupService`)
+- **MariaDB Connector/J** must be ≥ 3.5.0 for native VECTOR support (currently 3.5.2)
+
 ## Commands
 
 ```bash
@@ -106,15 +113,15 @@ All externalized via `application.yml` env vars:
 
 ## Test Coverage
 
-**Total: 528 tests across 5 modules (all passing)**
+**Total: 556 tests across 5 modules (all passing, 4 skipped require Docker)**
 
 | Module | Tests | Coverage Focus |
 |--------|-------|---------------|
 | `llm-wiki-common` | 48 | Enums, DTOs, scoring logic |
 | `llm-wiki-adapter` | 111 | AI API clients, embedding, wiki adapters |
-| `llm-wiki-domain` | 82 | JPA entities, repository queries |
+| `llm-wiki-domain` | 106 | JPA entities, repository queries, vector UserType |
 | `llm-wiki-service` | 172 | Pipeline, sync, search, graph, approval, maintenance |
-| `llm-wiki-web` | 115 | REST controllers, request/response handling |
+| `llm-wiki-web` | 119 | REST controllers, request/response handling (4 skipped: Docker-only) |
 
 **Test conventions:**
 - `@ExtendWith(MockitoExtension.class)` for unit tests
