@@ -1,42 +1,86 @@
 # llm-wiki-domain — Domain Layer
 
 **Module:** `com.llmwiki:llm-wiki-domain`
-**Depends on:** `llm-wiki-common`
+**Dependencies:** `llm-wiki-common`
 
 ## Overview
 
-JPA entities and Spring Data repositories. Organized by domain area under `com.llmwiki.domain`.
+JPA entities + Spring Data repositories. Organized by domain concept.
 
-## Domain Areas
+## Package Structure
 
-| Area | Entities | Purpose |
-|------|----------|---------|
-| `sync` | `RawDocument`, `WikiSource`, `SyncLog` | Wiki source polling + raw document ingestion |
-| `graph` | `KgNode`, `KgEdge`, `KgVector` | Knowledge graph with MariaDB VECTOR embeddings |
-| `page` | `Page`, `PageLink`, `PageTag`, `PageTagId` | Generated pages + cross-references + tags |
-| `processing` | `ProcessingLog` | Pipeline step tracking per document |
-| `approval` | `ApprovalQueue` | Approval workflow for generated pages |
-| `config` | `SystemConfig` | Key-value system settings (scoring thresholds, etc.) |
+```
+com.llmwiki.domain
+├── sync/                      # Wiki source sync entities
+│   ├── entity/                # WikiSource, SyncLog, RawDocument
+│   └── repository/            # JPA repositories
+├── processing/                # Pipeline processing
+│   ├── entity/                # ProcessingLog, DeadLetterQueue
+│   └── repository/            # JPA repositories
+├── graph/                     # Knowledge graph
+│   ├── entity/                # KgNode, KgEdge, KgVector
+│   ├── repository/            # JPA repositories (KgNodeRepository, KgEdgeRepository, KgVectorRepository)
+│   └── converter/             # Custom Hibernate UserType for VECTOR + deprecated FloatArrayToJsonConverter
+├── page/                      # Generated pages
+│   ├── entity/                # Page, PageLink, PageTag
+│   └── repository/            # JPA repositories
+├── approval/                  # Approval queue
+│   ├── entity/                # ApprovalQueue, ApprovalAudit
+│   └── repository/            # JPA repositories
+├── example/                   # Entity examples
+│   ├── entity/                # EntityExample
+│   └── repository/            # JPA repositories
+├── config/                    # System configuration
+│   ├── entity/                # SystemConfig
+│   └── repository/            # JPA repositories
+├── audit/                     # Audit logging
+│   ├── entity/                # AuditLog
+│   └── repository/            # JPA repositories
+└── maintenance/               # Maintenance entities
+    ├── entity/                # MaintenanceReportLog, MaintenanceReport, DuplicateGroup, ConsistencyReport
+    └── repository/            # JPA repositories
+```
 
-## Where to Look
+## VECTOR Column Convention
 
-| Task | Path |
-|------|------|
-| Entity definitions | `src/main/java/com/llmwiki/domain/{area}/entity/` |
-| Repositories | `src/main/java/com/llmwiki/domain/{area}/repository/` |
+MariaDB 11.8+ native VECTOR columns require a **Hibernate UserType** because the JDBC driver must use `setObject(float[])`, not `setString()`.
 
-## Conventions
+### Correct approach (ALWAYS use this):
 
-- Entities: `@Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor`
-- ID: `@Id @GeneratedValue(strategy = GenerationType.UUID)` → `UUID` type
-- Timestamps: `@PrePersist`/`@PreUpdate` with `Instant.now()`
-- Enums: `@Enumerated(EnumType.STRING)`, defined in `llm-wiki-common`
-- Repositories: Spring Data JPA interfaces, named `{Entity}Repository`
-- Composite keys: use `@IdClass` (e.g., `PageTagId` for `PageTag`)
+```java
+import org.hibernate.annotations.Type;
 
-## Anti-Patterns
+@Type(MariaDBVectorType.class)
+@Column(nullable = false, columnDefinition = "VECTOR(1536)")
+private float[] vector;
+```
 
-- Don't add business logic to entities — use service layer
-- Don't add Spring Data JDBC or MyBatis annotations — JPA only
-- Don't reference adapter/web/domain from here — domain is a leaf in the dependency graph
-- Don't use `Long` auto-increment IDs — UUID only
+- `MariaDBVectorType` (in `graph/converter/`) implements `UserType<float[]>` — writes via `PreparedStatement.setObject(index, float[])`
+- The `columnDefinition` is required for Flyway schema validation (`ddl-auto: validate`)
+
+### Incorrect approach (DO NOT use):
+
+```java
+// BROKEN at runtime — AttributeConverter uses setString(), not setObject()
+@Convert(converter = FloatArrayToJsonConverter.class)
+private float[] vector;
+```
+
+The old `FloatArrayToJsonConverter` is deprecated and no longer wired into any entity.
+
+### Native SQL for vector search:
+
+```sql
+-- Similarity search
+SELECT v.node_id, VEC_DISTANCE(v.vector, VEC_FromText(:queryVector)) AS distance
+FROM kg_vectors v ORDER BY distance ASC LIMIT :limit
+
+-- Vector insert (when bypassing JPA)
+INSERT INTO kg_vectors (node_id, vector, model) VALUES (?, VEC_FromText(?), ?)
+```
+
+## Repository Notes
+
+- All repositories extend `JpaRepository<T, UUID>`
+- **KgVectorRepository**: Exposes `findByNodeId()` and `findByNodeIdNot()` — vector similarity filtering is done at the service layer (to stay DB-agnostic for H2-based tests)
+- Avoid native queries in repositories when possible — use `EntityManager` in service layer for DB-specific SQL
